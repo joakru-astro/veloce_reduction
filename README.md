@@ -2,12 +2,12 @@
 
 Python code for simple reduction of data from Veloce @ AAT.
 
-The reduction workflow consists of follwoing steps:
-(data extraction)
+The reduction workflow consists of follwoing steps:\
+(data extraction)\
 1. Read logs
 2. Save targets list
-3. Extract science data
-(merging and normalisation)
+3. Extract science data\
+(merging and normalisation)\
 4. (optional) Make master flat
 5. Extract the blaze function from master flat
 6. Co-add orders
@@ -24,3 +24,5 @@ Repository consists of the following:
 - \[deprecated\] veloce_trace.ipynb - notebook containing extraction of trace based on flat field image
 - \[deprecated\] veloce_wave_calib.ipynb - notebook checking precomputed wave calibration
 - \[deprecated\] extract_one_night.ipynb - old notebook for extraction data from one night based on targets list
+
+[Sample data from CSV run](https://www.dropbox.com/scl/fo/qleydw5tsvpkpfl1jx985/AJmCFf8FNwuO7GEVXNzZSDQ?rlkey=xy9j0vfnb0wo6xzcf27n6wgpu&st=4gq4srkk&dl=0)
