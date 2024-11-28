@@ -39,4 +39,5 @@ conda env create -f environment.yml
 I aim to clean this environment and make a full instalation instruction. And probably rename the environment.
 
 ### Data
+Place your data in the /Data/Raw/ or specify your own path in veloce_path.py.
 [Sample data from CSV run](https://www.dropbox.com/scl/fo/qleydw5tsvpkpfl1jx985/AJmCFf8FNwuO7GEVXNzZSDQ?rlkey=xy9j0vfnb0wo6xzcf27n6wgpu&st=4gq4srkk&dl=0)
