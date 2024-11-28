@@ -32,8 +32,11 @@ Repository consists of the following:
 - \[deprecated\] extract_one_night.ipynb - old notebook for extraction data from one night based on targets list
 
 ### Requierments
-Conda environment can be recreated using: environment.yml<br>
-(I aim to clean this environment and make a full instalation instruction)
+Conda environment can be recreated using: 
+```
+conda env create -f environment.yml
+```
+I aim to clean this environment and make a full instalation instruction. And probably rename the environment.
 
 ### Data
 [Sample data from CSV run](https://www.dropbox.com/scl/fo/qleydw5tsvpkpfl1jx985/AJmCFf8FNwuO7GEVXNzZSDQ?rlkey=xy9j0vfnb0wo6xzcf27n6wgpu&st=4gq4srkk&dl=0)
