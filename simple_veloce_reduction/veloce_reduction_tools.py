@@ -807,6 +807,93 @@ def get_master(obs_list, master_type, data_path, run, date, arm):
 
     return np.median(frames, axis=2)
 
+def save_image_fits(filename, output_path, image, hdr):
+    """
+    Saves a 2D image array to a FITS file with a specified header.
+
+    This function saves a 2D image array to a FITS file with a specified header. The header can include metadata
+    information such as the observation date, exposure time, and telescope information. The function uses the
+    Astropy package to create a FITS HDU (Header-Data Unit) with the image data and header information and then
+    writes this HDU to a FITS file.
+
+    Parameters:
+    - filename (str): The name of the FITS file to save the image to.
+    - output_path (str): The path to the directory where the FITS file will be saved.
+    - image (numpy.ndarray): A 2D numpy array representing the image data to save.
+    - hdr (astropy.io.fits.header.Header): An Astropy header object containing metadata information for the image.
+
+    Returns:
+    - str: The full file path to the saved FITS file.
+
+    Note:
+    - The function assumes that the Astropy package is installed and that the FITS file will be saved in the
+      specified output directory.
+    """
+    hdu = fits.PrimaryHDU(image, header=hdr)
+    hdul = fits.HDUList([hdu])
+    output_filename = os.path.join(output_path, filename)
+    hdul.writeto(output_filename, overwrite=True)
+    return output_filename 
+
+def save_extracted_spectrum_fits(filename, output_path, wave, flux, hdr):
+    """
+    Saves a 2D spectrum array to a FITS file with a specified header.
+
+    This function saves a 2D spectrum array to a FITS file with a specified header. The spectrum array contains
+    both the wavelength values and the corresponding flux values. The header can include metadata information
+    such as the observation date, exposure time, and telescope information. The function uses the Astropy package
+    to create a FITS HDU (Header-Data Unit) with the spectrum data and header information and then writes this HDU
+    to a FITS file.
+
+    Parameters:
+    - filename (str): The name of the FITS file to save the spectrum to.
+    - output_path (str): The path to the directory where the FITS file will be saved.
+    - wave (numpy.ndarray): A 2D numpy array representing the wavelength values of the spectrum.
+    - flux (numpy.ndarray): A 2D numpy array representing the flux values of the spectrum.
+    - hdr (astropy.io.fits.header.Header): An Astropy header object containing metadata information for the spectrum.
+
+    Returns:
+    - str: The full file path to the saved FITS file.
+
+    Note:
+    - The function assumes that the Astropy package is installed and that the FITS file will be saved in the
+      specified output directory.
+    """
+    hdu_wave = fits.ImageHDU(wave, name='WAVE')
+    hdu_flux = fits.ImageHDU(flux, name='FLUX')
+    hdul = fits.HDUList([fits.PrimaryHDU(), hdu_wave, hdu_flux])
+    hdul[0].header = hdr
+    output_filename = os.path.join(output_path, filename)
+    hdul.writeto(output_filename, overwrite=True)
+    return output_filename
+
+def load_extracted_spectrum_fits(filename):
+    """
+    Loads a 2D spectrum array from a FITS file.
+
+    This function reads a FITS file containing a 2D spectrum array with wavelength and flux values and returns
+    the wavelength and flux arrays separately. The function uses the Astropy package to read the FITS file and
+    extract the wavelength and flux arrays from the HDU (Header-Data Unit) list.
+
+    Parameters:
+    - filename (str): The name of the FITS file to load the spectrum from.
+
+    Returns:
+    - tuple: A tuple containing the following elements:
+        - numpy.ndarray: A 2D numpy array representing the wavelength values of the spectrum.
+        - numpy.ndarray: A 2D numpy array representing the flux values of the spectrum.
+        - astropy.io.fits.header.Header: An Astropy header object containing metadata information for the spectrum.
+
+    Note:
+    - The function assumes that the Astropy package is installed and that the FITS file is correctly formatted
+      with wavelength and flux arrays stored in separate HDUs.
+    """
+    with fits.open(filename) as hdul:
+        wave = hdul['WAVE'].data
+        flux = hdul['FLUX'].data
+        hdr = hdul[0].header
+    return wave, flux, hdr
+
 if __name__ == '__main__':
     filename = '24aug30010.fits' # use the flat because of visibility
     spectrum_filename =  os.path.join(os.getcwd(), 'Data', filename)
