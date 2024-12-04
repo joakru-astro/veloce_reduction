@@ -8,7 +8,7 @@ from cv2 import connectedComponentsWithStats, merge
 
 from . import veloce_path
 
-def remove_overscan_bias(frame, overscan_range=32):
+def remove_overscan_bias(frame, hdr, overscan_range=32, amplifier_mode=4):
     """
     Removes the overscan bias from an image frame by subtracting the median of the overscan regions.
 
@@ -31,57 +31,108 @@ def remove_overscan_bias(frame, overscan_range=32):
     ylen, xlen = frame.shape
     xdiv, ydiv = int(xlen/2), int(ylen/2)
 
-    overscan_mask = np.zeros_like(frame)
+    # overscan_mask = np.zeros_like(frame)
+    if amplifier_mode == 4:
+        # top left - Q1
+        q1 = frame[overscan_range:ydiv-overscan_range, overscan_range:xdiv-overscan_range].copy().astype(np.float64)
+        q1_overscan_mask = np.zeros_like(frame)
+        # middle
+        q1_overscan_mask[:ydiv,xdiv-overscan_range:xdiv] = 1
+        q1_overscan_mask[ydiv-overscan_range:ydiv,:xdiv] = 1
+        # edge
+        q1_overscan_mask[:ydiv,:overscan_range] = 1
+        q1_overscan_mask[:overscan_range,:xdiv] = 1
+        q1 -= np.median(frame[q1_overscan_mask == 1])
+        q1[q1 < 0] = 0
+        q1_gain = float(hdr['DETA1GN'])
+        print(f'Gain for quadrant 1: {q1_gain}')
+        q1 /= q1_gain
 
-    # top left
-    q00 = frame[overscan_range:ydiv-overscan_range, overscan_range:xdiv-overscan_range].copy().astype(np.float64)
-    q00_overscan_mask = overscan_mask.copy()
-    # middle
-    q00_overscan_mask[:ydiv,xdiv-overscan_range:xdiv] = 1
-    q00_overscan_mask[ydiv-overscan_range:ydiv,:xdiv] = 1
-    # edge
-    q00_overscan_mask[:ydiv,:overscan_range] = 1
-    q00_overscan_mask[:overscan_range,:xdiv] = 1
-    q00 -= np.median(frame[q00_overscan_mask == 1])
+        # bottom left - Q2
+        q2 = frame[ydiv+overscan_range:ylen-overscan_range,overscan_range:xdiv-overscan_range].copy().astype(np.float64) 
+        q2_overscan_mask = np.zeros_like(frame)
+        # middle
+        q2_overscan_mask[ydiv:,xdiv-overscan_range:xdiv] = 1
+        q2_overscan_mask[ydiv:ydiv+overscan_range,:xdiv] = 1
+        # edge
+        q2_overscan_mask[ydiv:,:overscan_range] = 1
+        q2_overscan_mask[ylen-overscan_range:,:xdiv] = 1
+        q2 -= np.median(frame[q2_overscan_mask == 1])
+        q2[q2 < 0] = 0
+        q2_gain = float(hdr['DETA2GN'])
+        print(f'Gain for quadrant 2: {q2_gain}')
+        q2 /= q2_gain
 
-    # bottom left
-    q10 = frame[ydiv+overscan_range:ylen-overscan_range,overscan_range:xdiv-overscan_range].copy().astype(np.float64) 
-    q10_overscan_mask = overscan_mask.copy()
-    # middle
-    q10_overscan_mask[ydiv:,xdiv-overscan_range:xdiv] = 1
-    q10_overscan_mask[ydiv:ydiv+overscan_range,:xdiv] = 1
-    # edge
-    q10_overscan_mask[ydiv:,:overscan_range] = 1
-    q10_overscan_mask[ylen-overscan_range:,:xdiv] = 1
-    q10 -= np.median(frame[q10_overscan_mask == 1])
+        # bottom right - Q3
+        q3 = frame[ydiv+overscan_range:ylen-overscan_range,xdiv+overscan_range:xlen-overscan_range].copy().astype(np.float64)
+        q3_overscan_mask = np.zeros_like(frame)
+        # middle
+        q3_overscan_mask[ydiv:,xdiv:xdiv+overscan_range] = 1
+        q3_overscan_mask[ydiv:ydiv+overscan_range,xdiv:] = 1
+        # edge
+        q3_overscan_mask[ydiv:,xlen-overscan_range:] = 1
+        q3_overscan_mask[ylen-overscan_range:,xdiv:] = 1
+        q3 -= np.median(frame[q3_overscan_mask == 1])
+        q3[q3 < 0] = 0
+        q3_gain = float(hdr['DETA3GN'])
+        print(f'Gain for quadrant 3: {q3_gain}')
+        q3 /= q3_gain
 
-    # top right
-    q01 = frame[overscan_range:ydiv-overscan_range,xdiv+overscan_range:xlen-overscan_range].copy().astype(np.float64)
-    q01_overscan_mask = overscan_mask.copy()
-    # middle
-    q01_overscan_mask[:ydiv,xdiv:xdiv+overscan_range] = 1
-    q01_overscan_mask[ydiv-overscan_range:ydiv,xdiv:] = 1
-    # edge
-    q01_overscan_mask[:ydiv,xlen-overscan_range:] = 1
-    q01_overscan_mask[:overscan_range,xdiv:] = 1
-    q01 -= np.median(frame[q01_overscan_mask == 1])
+        # top right - Q4
+        q4 = frame[overscan_range:ydiv-overscan_range,xdiv+overscan_range:xlen-overscan_range].copy().astype(np.float64)
+        q4_overscan_mask = np.zeros_like(frame)
+        # middle
+        q4_overscan_mask[:ydiv,xdiv:xdiv+overscan_range] = 1
+        q4_overscan_mask[ydiv-overscan_range:ydiv,xdiv:] = 1
+        # edge
+        q4_overscan_mask[:ydiv,xlen-overscan_range:] = 1
+        q4_overscan_mask[:overscan_range,xdiv:] = 1
+        q4 -= np.median(frame[q4_overscan_mask == 1])
+        q4[q4 < 0] = 0
+        q4_gain = float(hdr['DETA4GN'])
+        print(f'Gain for quadrant 4: {q4_gain}')
+        q4 /= q4_gain
 
-    # bottom right
-    q11 = frame[ydiv+overscan_range:ylen-overscan_range,xdiv+overscan_range:xlen-overscan_range].copy().astype(np.float64)
-    q11_overscan_mask = overscan_mask.copy()
-    # middle
-    q11_overscan_mask[ydiv:,xdiv:xdiv+overscan_range] = 1
-    q11_overscan_mask[ydiv:ydiv+overscan_range,xdiv:] = 1
-    # edge
-    q11_overscan_mask[ydiv:,xlen-overscan_range:] = 1
-    q11_overscan_mask[ylen-overscan_range:,xdiv:] = 1
-    q11 -= np.median(frame[q11_overscan_mask == 1])
+        image_substracted_bias = np.concatenate(
+            (np.concatenate((q1, q2), axis=0), 
+            np.concatenate((q4, q3), axis=0)),
+            axis=1)
+    elif amplifier_mode == 2:
+        gain_scale = 0.964 # right/left gain ratio
+        # left - H1
+        h1 = frame[overscan_range:ylen-overscan_range, overscan_range:xdiv-overscan_range].copy().astype(np.float64)
+        h1_overscan_mask = np.zeros_like(frame)
+        # middle
+        h1_overscan_mask[:,xdiv-overscan_range:xdiv] = 1
+        # edge
+        h1_overscan_mask[:,:overscan_range] = 1
+        h1_overscan_mask[:overscan_range,:xdiv] = 1
+        h1_overscan_mask[ylen-overscan_range:,:xdiv] = 1
+        h1 -= np.median(frame[h1_overscan_mask == 1])
+        h1[h1 < 0] = 0
+        h1_gain = float(hdr['DETA1GN'])
+        print(f'Gain for half 1: {h1_gain}')
+        h1 /= h1_gain
 
-    image_substracted_bias = np.concatenate(
-        (np.concatenate((q00, q10), axis=0), 
-         np.concatenate((q01, q11), axis=0)),
-        axis=1)
-    image_substracted_bias[image_substracted_bias <= 0] = 0
+        # right - H2
+        h2 = frame[overscan_range:ylen-overscan_range,xdiv+overscan_range:xlen-overscan_range].copy().astype(np.float64)
+        h2_overscan_mask = np.zeros_like(frame)
+        # middle
+        h2_overscan_mask[:,xdiv:xdiv+overscan_range] = 1
+        # edge
+        h2_overscan_mask[:,:overscan_range] = 1
+        h2_overscan_mask[ylen-overscan_range:,xdiv:] = 1
+        h2_overscan_mask[ylen-overscan_range:,xdiv:] = 1
+        h2 -= np.median(frame[h2_overscan_mask == 1])
+        h2[h2 < 0] = 0
+        # h2_gain = float(hdr['DETA2GN'])
+        h2_gain = h1_gain * gain_scale
+        print(f'Gain for half 2: {h2_gain}')
+        h2 /= h2_gain
+
+        image_substracted_bias = np.concatenate((h1, h2), axis=1)
+    else:
+        raise ValueError("Invalid amplifier mode. Amplifier mode must be 2 or 4.")
     
     return image_substracted_bias
 
