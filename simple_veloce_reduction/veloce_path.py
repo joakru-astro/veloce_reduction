@@ -3,9 +3,9 @@ import os
 
 class VelocePaths:
     def __init__(self, run=None):
-        self.raw_parent_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Data', 'Raw')
-        self.extracted_parent_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Data', 'Extracted')
-        self.reduction_parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.raw_parent_dir = '/home/usqobserver2/VeloceData/'
+        self.extracted_parent_dir = '/home/usqobserver2/Joachim_veloce/Extracted_data/'
+        self.reduction_parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))#'~/Joachim_veloce/Veloce_reduction/'
         # print(self.reduction_parent_dir)
         self.wave_dir = os.path.join(self.reduction_parent_dir, 'Wave')
         self.trace_dir = os.path.join(self.reduction_parent_dir, 'Trace')

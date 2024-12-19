@@ -2,9 +2,9 @@ from astropy.io import fits
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import median_filter
+from scipy.ndimage import median_filter, label, find_objects
 from csaps import csaps
-from cv2 import connectedComponentsWithStats, merge
+# from cv2 import connectedComponentsWithStats, merge
 
 from . import veloce_path
 
@@ -154,22 +154,29 @@ def plot_cross_section(frame, n, axis='x'):
     - The median filter size is hardcoded to 501, which may not be suitable for all image sizes.
       Adjust accordingly.
     """
-    xlen, ylen = frame.shape
+    fig, ax = plt.subplots()
     if axis=='x':
         row = n
         x = np.arange(len(frame[row,:]))
-        threshold = median_filter(frame[row,:],501) + 1
-        plt.plot(x, threshold)
-        plt.step(x, frame[row,:])
+        threshold = median_filter(frame[row,:],501,mode='nearest') + 1
+        ax.plot(x, threshold)
+        ax.step(x, frame[row,:])
+        ax.set_title(f'Cross-section at row {n}')
         
     elif axis=='y':
         col = n
         x = np.arange(len(frame[:,col]))
-        threshold = median_filter(frame[:,col],501) + 1
-        plt.plot(x, threshold)
-        plt.step(x, frame[:,col])
+        threshold = median_filter(frame[:,col],501,mode='nearest') + 1
+        ax.plot(x, threshold)
+        ax.step(x, frame[:,col])
+        ax.set_title(f'Cross-section at column {n}')
+    ax.set_xlabel('Pixel')
+    ax.set_ylabel('Counts')
+    ax.set_xlim(0, len(frame[0,:]))
+    ax.set_ylim(0,)
+    return fig, ax
 
-def get_binary_mask(frame, axis='x'):
+def get_binary_mask(frame, arm, axis='x'):
     """
     Generates a binary mask for an image frame based on a threshold determined by a median filter.
 
@@ -191,20 +198,79 @@ def get_binary_mask(frame, axis='x'):
     - The median filter size is set to 501, which may need adjustment based on the image size and the desired
       level of detail in the binary mask.
     """
-    binary_mask = np.zeros(frame.shape)
-    if axis=='x':
-        for i in range(len(frame[:,0])):
-            threshold = median_filter(frame[i,:],501) + 1
-            mask = frame[i,:]>threshold
-            binary_mask[i,:][mask] = 1       
-    elif axis=='y':
-        for i in range(len(frame[0,:])):
-            threshold = median_filter(frame[:,i],501) + 1
-            mask = frame[:,i]>threshold
-            binary_mask[:,i][mask] = 1
-    return binary_mask
+    if arm == 'red':
+      if axis == 'x':
+          # Apply median filter along rows
+          filtered_frame = median_filter(frame, size=(1, 501), mode='nearest')
+      elif axis == 'y':
+          # Apply median filter along columns
+          filtered_frame = median_filter(frame, size=(501, 1), mode='nearest')
+      else:
+          raise ValueError("Axis must be 'x' or 'y'.")
+    elif arm == 'green':
+      if axis == 'x':
+          # Apply median filter along rows
+          filtered_frame = median_filter(frame, size=(1, 501), mode='nearest')
+      elif axis == 'y':
+          # Apply median filter along columns
+          filtered_frame = median_filter(frame, size=(501, 1), mode='nearest')
+      else:
+          raise ValueError("Axis must be 'x' or 'y'.")
+    elif arm == 'blue':
+      if axis == 'x':
+          # Apply median filter along rows
+          filtered_frame = median_filter(frame, size=(1, 151), mode='nearest')
+      elif axis == 'y':
+          # Apply median filter along columns
+          filtered_frame = median_filter(frame, size=(151, 1), mode='nearest')
+      else:
+          raise ValueError("Axis must be 'x' or 'y'.")
+    else:
+      raise ValueError("Invalid arm. Arm must be 'red', 'green', or 'blue'.")
+
+    # Create binary mask
+    binary_mask = frame > (filtered_frame + 1)
+    binary_mask[:100,:] = 0
+    binary_mask[-100:,:] = 0
+    
+    return binary_mask.astype(np.uint8)
 
 ### old version 
+# def get_binary_mask(frame, axis='x'):
+#     """
+#     Generates a binary mask for an image frame based on a threshold determined by a median filter.
+
+#     This function applies a median filter along the specified axis of the image frame and adds a constant value
+#     of 1 to the result to determine a threshold. For each pixel, if its value is greater than this threshold,
+#     it is marked as 1 (True) in the binary mask; otherwise, it is marked as 0 (False). This process is repeated
+#     for each row (if axis='x') or each column (if axis='y') of the frame.
+
+#     Parameters:
+#     - frame (numpy.ndarray): The input image frame as a 2D numpy array.
+#     - axis (str, optional): The axis along which the median filter is applied. 'x' for rows, 'y' for columns.
+#       Defaults to 'x'.
+
+#     Returns:
+#     - numpy.ndarray: A binary mask of the same shape as `frame`, where each pixel is marked as 1 if its value
+#       is greater than the threshold determined by the median filter and the constant value, and 0 otherwise.
+
+#     Note:
+#     - The median filter size is set to 501, which may need adjustment based on the image size and the desired
+#       level of detail in the binary mask.
+#     """
+#     binary_mask = np.zeros(frame.shape)
+#     if axis=='x':
+#         for i in range(len(frame[:,0])):
+#             threshold = median_filter(frame[i,:],501) + 1
+#             mask = frame[i,:]>threshold
+#             binary_mask[i,:][mask] = 1       
+#     elif axis=='y':
+#         for i in range(len(frame[0,:])):
+#             threshold = median_filter(frame[:,i],501) + 1
+#             mask = frame[:,i]>threshold
+#             binary_mask[:,i][mask] = 1
+#     return binary_mask
+
 # def get_binary_mask(frame, axis='x'):
 #     if axis=='x':
 #         binary_mask = np.zeros(frame.shape)
@@ -231,10 +297,10 @@ def get_orders_masks(binarized):
     Identifies and extracts spectral orders from a binarized image of a spectrum.
 
     This function processes a binarized image to identify connected components (blobs) representing potential
-    spectral orders. It converts the binary mask to an 8-bit format, uses connected component analysis to
-    separate and label different blobs, and then filters these blobs based on a size threshold to isolate
-    the spectral orders. The size threshold is dynamically determined by finding the largest gap in the sorted
-    sizes of the blobs, assuming this gap differentiates between noise and actual orders.
+    spectral orders. It uses connected component analysis to separate and label different blobs, and then filters
+    these blobs based on a size threshold to isolate the spectral orders. The size threshold is dynamically determined
+    by finding the largest gap in the sorted sizes of the blobs, assuming this gap differentiates between noise and
+    actual orders.
 
     Parameters:
     - binarized (numpy.ndarray): A binary image (2D numpy array) where pixels belonging to spectral orders
@@ -250,27 +316,77 @@ def get_orders_masks(binarized):
       noise from actual spectral orders. This heuristic may need adjustment for images with different
       characteristics or noise levels.
     """
-    bin_uint8 = (binarized * 255).astype(np.uint8)
-
-    nb_blobs, im_with_separated_blobs, stats, _ = connectedComponentsWithStats(bin_uint8) # from cv2                                                                           
-    sizes = stats[:, -1]
-    sizes = sizes[1:] # skip background
-    nb_blobs -= 1
+    # Label connected components
+    labeled_array, num_features = label(binarized)
     
-    # minimum size of orders to keep (number of pixels).
+    # Find objects (bounding boxes) for each labeled component
+    objects = find_objects(labeled_array)
+    
+    # Calculate sizes of each component
+    sizes = [np.sum(labeled_array[obj] > 0) for obj in objects]
+    
+    # Determine size threshold
     sorted_sizes = sorted(sizes)
-    min_size = sorted_sizes[np.argmax(np.diff(sorted_sizes))+1] 
-    orders = []
+    min_size = sorted_sizes[np.argmax(np.diff(sorted_sizes)) + 1]
     
-    # keep blobs above min_size - hopefuly results in orders
-    for blob in range(nb_blobs):
-        if sizes[blob] >= min_size:
-            order = np.zeros_like(binarized)
-            order[im_with_separated_blobs == blob + 1] = 1
-            orders.append(order)
+    # Filter components based on size threshold
+    orders = []
+    for i, obj in enumerate(objects):
+        if sizes[i] >= min_size:
+            mask = np.zeros_like(binarized, dtype=np.uint16)
+            mask[obj] = labeled_array[obj] == (i + 1)
+            orders.append(mask)
+    
     orders = np.array(orders, dtype=np.uint16)
-
     return orders
+
+### old version
+# def get_orders_masks(binarized):
+#     """
+#     Identifies and extracts spectral orders from a binarized image of a spectrum.
+
+#     This function processes a binarized image to identify connected components (blobs) representing potential
+#     spectral orders. It converts the binary mask to an 8-bit format, uses connected component analysis to
+#     separate and label different blobs, and then filters these blobs based on a size threshold to isolate
+#     the spectral orders. The size threshold is dynamically determined by finding the largest gap in the sorted
+#     sizes of the blobs, assuming this gap differentiates between noise and actual orders.
+
+#     Parameters:
+#     - binarized (numpy.ndarray): A binary image (2D numpy array) where pixels belonging to spectral orders
+#       are marked as 1 (True) and others as 0 (False).
+
+#     Returns:
+#     - numpy.ndarray: A 3D numpy array where each 2D slice represents a binary mask for an individual spectral
+#       order. The dtype is np.uint16 to accommodate potentially large images while saving memory compared to
+#       the default integer size.
+
+#     Note:
+#     - The function assumes that the largest size gap in the sorted list of blob sizes effectively separates
+#       noise from actual spectral orders. This heuristic may need adjustment for images with different
+#       characteristics or noise levels.
+#     """
+    
+#     bin_uint8 = (binarized * 255).astype(np.uint8)
+
+#     nb_blobs, im_with_separated_blobs, stats, _ = connectedComponentsWithStats(bin_uint8) # from cv2                                                                           
+#     sizes = stats[:, -1]
+#     sizes = sizes[1:] # skip background
+#     nb_blobs -= 1
+    
+#     # minimum size of orders to keep (number of pixels).
+#     sorted_sizes = sorted(sizes)
+#     min_size = sorted_sizes[np.argmax(np.diff(sorted_sizes))+1] 
+#     orders = []
+    
+#     # keep blobs above min_size - hopefuly results in orders
+#     for blob in range(nb_blobs):
+#         if sizes[blob] >= min_size:
+#             order = np.zeros_like(binarized)
+#             order[im_with_separated_blobs == blob + 1] = 1
+#             orders.append(order)
+#     orders = np.array(orders, dtype=np.uint16)
+
+#     return orders
 
 def get_traces(frame, orders):
     """
@@ -317,7 +433,7 @@ def get_traces(frame, orders):
         f = np.polyval(f,y)
         fit_x = []
         fit_y = []
-        fit_width = 30 # 35 catches calibration fibers
+        fit_width = 35 # 35 catches calibration fibers
         for i in y:
             row = frame[i,:].copy()
             xmin = max(0,int(f[i])-fit_width)
@@ -334,125 +450,61 @@ def get_traces(frame, orders):
     traces = np.array(sorted(traces, key=lambda x: x[2000]))
     return traces
 
-def get_traces_refactored(frame, orders):
-    """
-    Extracts the polynomial fits for spectral order traces from an 2D spectrum image using a more Pythonic approach.
+# def find_summing_range(frame, traces):
+#     # TO DO, asymetric version
+#     """
+#     Calculates the optimal summing range for each spectral trace.
 
-    This function processes an input image frame and a set of binary masks corresponding to spectral orders
-    to extract and fit polynomial curves that trace the center of each spectral order across the image.
-    The process involves two main steps for each order:
-    1. Initial rough centerline extraction and quadratic fitting.
-    2. Refined extraction with a fixed width around the initial fit and polynomial fitting of degree 5.
+#     This function iterates over each trace in a given set of spectral traces, determining the optimal
+#     summing range for each. The summing range is defined as the width around the trace where the signal
+#     is significantly above the background noise, which is determined by a threshold based on the standard
+#     deviation of the signal within a maximum width from the trace center. The function aims to dynamically
+#     adjust the summing range for each trace based on the local signal characteristics.
 
-    Parameters:
-    - frame (numpy.ndarray): The input image frame as a 2D numpy array of shape (ylen, xlen), where ylen and
-      xlen are the dimensions of the image.
-    - orders (list of numpy.ndarray): A list of binary masks for each spectral order. Each mask is a 2D numpy
-      array of the same shape as `frame`, where pixels belonging to the order are marked as 1.
+#     Parameters:
+#     - frame (numpy.ndarray): The input image frame as a 2D numpy array of shape (ylen, xlen), where ylen and
+#       xlen are the dimensions of the image.
+#     - traces (numpy.ndarray): An array of polynomial coefficients for each spectral order. Each element in
+#       the array is a 1D numpy array of polynomial coefficients that describe the trace of a spectral order
+#       across the image.
 
-    Returns:
-    - numpy.ndarray: An array of polynomial coefficients for each order. Each element in the array is a
-      1D numpy array of polynomial coefficients that describe the trace of a spectral order across the image.
-      The traces are sorted based on their position at a fixed y-coordinate.
+#     Returns:
+#     - numpy.ndarray: An array of integers, each representing the calculated summing range for the corresponding
+#       spectral trace in `traces`.
 
-    Note:
-    - The function assumes that the input frame and orders are preprocessed and that the orders are correctly
-      isolated in the binary masks.
-    - The fit_width parameter (set to 30) determines the horizontal range considered around the initial fit
-      for the refined fitting process. This width may need adjustment.
-    """
-    ylen, xlen = frame.shape
-    y = np.arange(ylen)
+#     Note:
+#     - The function currently implements a symmetric summing range calculation, with a TODO note for developing
+#       an asymmetric version in the future.
+#     - The maximum width considered for summing is hardcoded to 30 pixels, but this could be adjusted based on
+#       the specific characteristics of the image and the spectral orders.
+#     - The threshold for determining significant signal is currently set as the standard deviation of the signal
+#       within the maximum width from the trace center, but alternative thresholding methods are commented out.
+#     """
 
-    def get_weighted_average(row):
-        if np.any(row):
-            return np.average(np.arange(len(row)), weights=row)
-        return None
 
-    def refine_fit(fit_y, fit_x, degree=5):
-        f = np.polyfit(fit_y, fit_x, degree)
-        return np.polyval(f, y)
-
-    traces = []
-    for order in orders:
-        # Zero out non-order pixels
-        img = np.where(order, frame, 0)
-
-        # Initial quadratic fit
-        initial_fit_x = [get_weighted_average(img[i, :]) for i in y]
-        valid_points = [(x, i) for i, x in enumerate(initial_fit_x) if x is not None]
-        fit_y, fit_x = zip(*valid_points)
-        quadratic_fit = refine_fit(fit_y, fit_x, 2)
-
-        # Refinement with fixed width
-        fit_width = 30
-        refined_fit_x = [
-            get_weighted_average(frame[i, max(0, int(quadratic_fit[i])-fit_width):min(xlen, int(quadratic_fit[i])+fit_width)])
-            for i in y
-        ]
-        valid_refined_points = [(x, i) for i, x in enumerate(refined_fit_x) if x is not None]
-        fit_y, fit_x = zip(*valid_refined_points)
-        refined_fit = refine_fit(fit_y, fit_x)
-
-        traces.append(refined_fit)
-
-    # Sort traces based on their position at a fixed y-coordinate
-    traces = np.array(sorted(traces, key=lambda x: x[2000]))
-    return traces
-
-def find_summing_range(frame, traces):
-    # TO DO, asymetric version
-    """
-    Calculates the optimal summing range for each spectral trace.
-
-    This function iterates over each trace in a given set of spectral traces, determining the optimal
-    summing range for each. The summing range is defined as the width around the trace where the signal
-    is significantly above the background noise, which is determined by a threshold based on the standard
-    deviation of the signal within a maximum width from the trace center. The function aims to dynamically
-    adjust the summing range for each trace based on the local signal characteristics.
-
-    Parameters:
-    - frame (numpy.ndarray): The input image frame as a 2D numpy array of shape (ylen, xlen), where ylen and
-      xlen are the dimensions of the image.
-    - traces (numpy.ndarray): An array of polynomial coefficients for each spectral order. Each element in
-      the array is a 1D numpy array of polynomial coefficients that describe the trace of a spectral order
-      across the image.
-
-    Returns:
-    - numpy.ndarray: An array of integers, each representing the calculated summing range for the corresponding
-      spectral trace in `traces`.
-
-    Note:
-    - The function currently implements a symmetric summing range calculation, with a TODO note for developing
-      an asymmetric version in the future.
-    - The maximum width considered for summing is hardcoded to 30 pixels, but this could be adjusted based on
-      the specific characteristics of the image and the spectral orders.
-    - The threshold for determining significant signal is currently set as the standard deviation of the signal
-      within the maximum width from the trace center, but alternative thresholding methods are commented out.
-    """
-    ylen, xlen = frame.shape
-    summing_ranges = []
-    y = np.arange(ylen)
-    max_width = 30
-    for trace in traces:
-        summing_range = []
-        for i in y:
-            row = frame[i,:].copy()
-            xmin = max(0,int(trace[i])-max_width)
-            xmax = max(0, min(int(trace[i])+max_width,xlen))
-            if xmin != xmax:
-                row[:xmin] = 0
-                row[xmax:] = 0
-                mask = row > 0
-        #         threshold = np.median(row[(row<np.median(row[mask])) & (row > 0)]) + 3 * np.std(row[(row<np.median(row[mask])) & (row > 0)])
-        #         threshold = 3 * np.std(row[(row<np.median(row[mask]))])
-                threshold = np.std(row[mask])
-                if sum(row > threshold) < 1.8*max_width and sum(row > threshold) > max_width/2:
-                    summing_range.append(sum(row > threshold))
-        summing_range = int(np.median(summing_range)/2)
-        summing_ranges.append(summing_range)
-    summing_ranges = np.array(summing_ranges)
-    return summing_ranges
+#     ylen, xlen = frame.shape
+#     summing_ranges = []
+#     y = np.arange(ylen)
+#     max_width = 30
+#     for trace in traces:
+#         summing_range = []
+#         for i in y:
+#             row = frame[i,:].copy()
+#             xmin = max(0,int(trace[i])-max_width)
+#             xmax = max(0, min(int(trace[i])+max_width,xlen))
+#             if xmin != xmax:
+#                 row[:xmin] = 0
+#                 row[xmax:] = 0
+#                 mask = row > 0
+#         #         threshold = np.median(row[(row<np.median(row[mask])) & (row > 0)]) + 3 * np.std(row[(row<np.median(row[mask])) & (row > 0)])
+#         #         threshold = 3 * np.std(row[(row<np.median(row[mask]))])
+#                 threshold = np.std(row[mask])
+#                 if sum(row > threshold) < 1.8*max_width and sum(row > threshold) > max_width/2:
+#                     summing_range.append(sum(row > threshold))
+#         summing_range = int(np.median(summing_range)/2)
+#         summing_ranges.append(summing_range)
+#     summing_ranges = np.array(summing_ranges)
+#     return summing_ranges
 
 def remove_order_background(order, n_pix=5):
     """
@@ -718,7 +770,63 @@ def plot_order_cross_section(frame, traces, summing_range, order, plot_type='med
 # X = [np.array(line.split(), dtype=np.float64) for line in lines[2::4]]
 # Y = [np.array(line.split(), dtype=np.float64) for line in lines[3::4]]
 
-def load_prefitted_ThAr(arm='red', wave_path=None, filename=None):
+def load_prefitted_wavecalib_trace(arm='red', calib_type='Th', trace_path=None, filename=None):
+  """
+  Load pre-fitted wavelength calibration trace data.
+  
+  Parameters:
+  - arm (str): The arm of the spectrograph ('red', 'green', or 'blue'). Default is 'red'.
+  - calib_type (str): The type of calibration ('Th' for ThAr or 'LC' for Laser Comb). Default is 'Th'.
+  - trace_path (str, optional): The path to the directory containing the trace files. If None, a default path is used.
+  - filename (str, optional): The specific filename to load. If None, a default filename based on the arm and calib_type is used.
+  Returns:
+  - tuple: A tuple containing:
+    - ORDER (np.ndarray): Array of order numbers.
+    - COEFFS (list of np.ndarray): List of coefficient arrays for each order.
+    - Y (list of np.ndarray): List of Y-coordinate arrays for each order.
+    - X (list of np.ndarray): List of X-coordinate arrays for each order.
+  Raises:
+  - FileNotFoundError: If the specified file is not found.
+  - ValueError: If 'LC' calibration is requested for the 'blue' arm, which is not available.
+  - ValueError: If unsupported arm name is requested.
+  """
+
+  if trace_path is None:
+      veloce_paths = veloce_path.VelocePaths()
+      trace_path = veloce_paths.trace_dir
+  if filename is not None:
+      filename = os.path.join(trace_path, filename)
+          
+  elif arm == 'red':
+      if calib_type == 'Th':
+          filename = os.path.join(trace_path, 'rosso-th-m65-104-all.trace')
+      elif calib_type == 'LC':
+          filename = os.path.join(trace_path, 'rosso-lc-m65-104-all.trace')
+  elif arm == 'green':
+      if calib_type == 'Th':
+          filename = os.path.join(trace_path, 'verde-th-m104-139-all.trace')
+      elif calib_type == 'LC':
+          filename = os.path.join(trace_path, 'verde-lc-m104-135-all.trace')
+  elif arm == 'blue':
+      if calib_type == 'Th':
+          filename = os.path.join(trace_path, 'azzurro-th-m138-167-all.trace')
+      elif calib_type == 'LC':
+          raise ValueError('No LC calibration for blue arm.')
+  else:
+      raise ValueError('Unknown arm. Must be "red", "green" or "blue".')
+
+  try:
+      with open(filename, 'r') as file:
+          lines = [line[:-1] for line in file]
+          ORDER = np.array([line.split()[0] for line in lines[::4]], dtype=np.uint8)
+          COEFFS = [np.array(line.split()[1:], dtype=np.float64) for line in lines[1::4]]
+          Y = [np.array(line.split(), dtype=np.float64) for line in lines[2::4]]
+          X = [np.array(line.split(), dtype=np.float64) for line in lines[3::4]]
+  except FileNotFoundError:
+      raise FileNotFoundError(f"File {filename} not found in {trace_path}.")
+  return ORDER, COEFFS, Y, X
+
+def load_prefitted_wave(arm='red', wave_path=None, filename=None):
     """
     Loads pre-fitted thorium-argon (ThAr) calibration data for a specified spectrograph arm.
 
@@ -768,7 +876,7 @@ def load_prefitted_ThAr(arm='red', wave_path=None, filename=None):
     elif arm == 'blue':
         filename = os.path.join(wave_path, 'vdarc_azzurro_240820-correct-vac-wavel.dat')
     else:
-        raise ValueError('Unknown arm. Must be "red", "green" or "blue"')
+        raise ValueError('Unknown arm. Must be "red", "green" or "blue".')
 
     with open(filename, 'r') as file:
         lines = [line[:-1] for line in file]
@@ -781,7 +889,10 @@ def load_prefitted_ThAr(arm='red', wave_path=None, filename=None):
     GUESS_LAM = [np.array(line.split()[1:], dtype=np.float64) for line in lines[7::9]]
     Y0 = np.array([line.split()[-1] for line in lines[1::9]], dtype=np.uint16)
 
-    return ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0
+    if arm == 'red':
+      return ORDER[1:], COEFFS[1:], MATCH_LAM[1:], MATCH_PIX[1:], MATCH_LRES[1:], GUESS_LAM[1:], Y0[1:]
+    else:
+      return ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0
 
 def calibrate_orders_to_wave(orders, Y0, coefficients):
     """

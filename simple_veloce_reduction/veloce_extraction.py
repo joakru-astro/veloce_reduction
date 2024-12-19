@@ -11,7 +11,7 @@ import pickle
 from . import veloce_reduction_tools
 from . import veloce_path
 
-def  extract_run_no_blaze(obs_list_filename, run, arm, veloce_paths=None, output_path=None):
+def extract_run_no_blaze(obs_list_filename, run, arm, sim_calib=False, veloce_paths=None, output_path=None):
     """
     Extracts spectral data from Veloce observations without applying blaze correction.
 
@@ -59,19 +59,13 @@ def  extract_run_no_blaze(obs_list_filename, run, arm, veloce_paths=None, output
         raise ValueError('Unsupported arm')
     
     # load wave calibration based on ThAr
-    ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = veloce_reduction_tools.load_prefitted_ThAr(arm=arm, wave_path=veloce_paths.wave_dir)
+    ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_path=veloce_paths.wave_dir)
     # load traces
-    trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_trace_{arm}.npz'))
-    traces, summing_ranges = trace_data['traces'], trace_data['summing_ranges']
-    # adjust summing ranges 
-    ### TODO: take a close look at this summing ranges and prepare files that aren't modified?
-    ### remember that traces can change between runs/nights if someone was fiddling with spectrograph
-    if arm == 'green':
-        summing_ranges_mod = np.array([[25,27] for _ in range(len(summing_ranges))])
-    elif arm == 'red':
-        summing_ranges_mod = np.array([[31,31] for _ in range(len(summing_ranges))])
+    if sim_calib:
+        trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
     else:
-        raise ValueError('Unsupported arm')
+        trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
+    traces, summing_ranges = trace_data['traces'], trace_data['summing_ranges']
 
     with open(os.path.join(os.path.join(veloce_paths.obs_list_dir, obs_list_filename)), 'rb') as f:
         obs_list = pickle.load(f)
@@ -87,7 +81,7 @@ def  extract_run_no_blaze(obs_list_filename, run, arm, veloce_paths=None, output
                 # times.append(hdr['MJD-OBS'])
                 image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(image_data, overscan_range=32)
                 extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
-                    image_subtracted_bias, traces, summing_ranges_mod, remove_background=False)
+                    image_subtracted_bias, traces, summing_ranges, remove_background=False)
                 ### green part needs shift by one order - issue with labeling?
                 if arm == 'green':
                     final_wave = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
@@ -98,11 +92,15 @@ def  extract_run_no_blaze(obs_list_filename, run, arm, veloce_paths=None, output
                         extracted_science_orders, Y0[0], COEFFS))
                     final_flux = np.array(extracted_science_orders)
 
-                np.savez(
-                    os.path.join(output_path, f"{target}_veloce_{arm}_{filename.split('.')[0]}"),
-                    wave=final_wave, flux=final_flux, mjd=float(hdr['MJD-OBS']))
+                # save extracted spectrum as fits file
+                fits_filename = os.path.join(output_path, f"{target}_veloce_{arm}_{filename}")
+                veloce_reduction_tools.save_extracted_spectrum_fits(
+                    filename=fits_filename, output_path=output_path, wave=final_wave, flux=final_flux, hdr=hdr)
+                # np.savez(
+                #     os.path.join(output_path, f"{target}_veloce_{arm}_{filename.split('.')[0]}"),
+                #     wave=final_wave, flux=final_flux, mjd=float(hdr['MJD-OBS']))
                 
-def extract_run_with_blaze(obs_list_filename, run, arm, blaze_path=None, veloce_paths=None, output_path=None):
+def extract_run_with_blaze(obs_list_filename, run, arm, sim_calib=False, blaze_path=None, veloce_paths=None, output_path=None):
     """
     Extracts spectral data from Veloce observations with blaze correction applied.
 
@@ -150,19 +148,15 @@ def extract_run_with_blaze(obs_list_filename, run, arm, blaze_path=None, veloce_
         raise ValueError('Unsupported arm')
     
     # load wave calibration based on ThAr
-    ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = veloce_reduction_tools.load_prefitted_ThAr(arm=arm, wave_path=veloce_paths.wave_dir)
+    ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_path=veloce_paths.wave_dir)
     # load traces
-    trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_trace_{arm}.npz'))
-    traces, summing_ranges = trace_data['traces'], trace_data['summing_ranges']
-    # adjust summing ranges 
-    ### TODO: take a close look at this summing ranges and prepare files that aren't modified?
-    ### remember that traces can change between runs/nights if someone was fiddling with spectrograph
-    if arm == 'green':
-        summing_ranges_mod = np.array([[25,27] for _ in range(len(summing_ranges))])
-    elif arm == 'red':
-        summing_ranges_mod = np.array([[31,31] for _ in range(len(summing_ranges))])
+        # load traces
+    if sim_calib:
+        trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
     else:
-        raise ValueError('Unsupported arm')
+        trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
+    traces, summing_ranges = trace_data['traces'], trace_data['summing_ranges']
+
     ### load blazes
     if blaze_path in None:
         blaze_path = os.path.join(veloce_paths.blaze_dir, f'veloce_blaze_{arm}_pix.npz')
@@ -187,7 +181,7 @@ def extract_run_with_blaze(obs_list_filename, run, arm, blaze_path=None, veloce_
                 # times.append(hdr['MJD-OBS'])
                 image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(image_data, overscan_range=32)
                 extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
-                    image_subtracted_bias, traces, summing_ranges_mod, remove_background=False)
+                    image_subtracted_bias, traces, summing_ranges, remove_background=False)
                 ### green part needs shift by one order issue with labeling?
                 if arm == 'green':
                     waves = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
@@ -213,9 +207,13 @@ def extract_run_with_blaze(obs_list_filename, run, arm, blaze_path=None, veloce_
                 final_wave = np.array(final_wave)
                 final_flux = np.array(final_flux)
 
-                np.savez(
-                    os.path.join(output_path, f"{target}_veloce_{arm}_{filename.split('.')[0]}"),
-                    wave=final_wave, flux=final_flux, mjd=float(hdr['MJD-OBS']))
+                # save extracted spectrum as fits file
+                fits_filename = os.path.join(output_path, f"{target}_veloce_{arm}_{filename}")
+                veloce_reduction_tools.save_extracted_spectrum_fits(
+                    filename=fits_filename, output_path=output_path, wave=final_wave, flux=final_flux, hdr=hdr)
+                # np.savez(
+                #     os.path.join(output_path, f"{target}_veloce_{arm}_{filename.split('.')[0]}"),
+                #     wave=final_wave, flux=final_flux, mjd=float(hdr['MJD-OBS']))
 
 def extract_blaze(file_name, arm, blaze_path=None, master_path=None, veloce_paths=None,):
     """
