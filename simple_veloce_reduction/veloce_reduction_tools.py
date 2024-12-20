@@ -450,6 +450,44 @@ def get_traces(frame, orders):
     traces = np.array(sorted(traces, key=lambda x: x[2000]))
     return traces
 
+def refit_traces(frame, trace_x, trace_y):
+    """
+
+    """
+    traces = []
+    ylen, xlen = frame.shape
+    full_y = range(ylen)
+    for order in range(len(trace_x)):
+        fit_x, fit_y = [], []
+        fit_width = 50 # 35 catches calibration fibers
+        for y, x in zip(trace_y[order], trace_x[order]):
+            row = frame[int(y),:].copy()
+            xmin = max(0,int(x)-fit_width)
+            xmax = max(0,min(int(x)+fit_width,xlen))
+            row[:xmin] = 0
+            row[xmax:] = 0
+            if np.sum(row) != 0 and x-fit_width>0 and x+fit_width<xlen:
+                weighted_average = np.average(np.arange(len(row)),weights=row)
+                fit_x.append(weighted_average)
+                fit_y.append(y)
+        f = np.polyfit(fit_y,fit_x,2)
+        f = np.polyval(f,full_y)
+        for y in full_y:
+            row = frame[y,:].copy()
+            xmin = max(0,int(f[y]-fit_width))
+            xmax = max(0,min(int(f[y])+fit_width,xlen))
+            row[:xmin] = 0
+            row[xmax:] = 0
+            if np.sum(row) != 0 and f[y]-fit_width>0 and f[y]+fit_width<xlen:
+                weighted_average = np.average(np.arange(len(row)),weights=row)
+                fit_x.append(weighted_average)
+                fit_y.append(y)
+        f = np.polyfit(fit_y,fit_x,5)
+        f = np.polyval(f,full_y)
+        traces.append(f)
+    traces = np.array(sorted(traces, key=lambda x: x[2000]))
+    return traces
+
 # def find_summing_range(frame, traces):
 #     # TO DO, asymetric version
 #     """
@@ -891,6 +929,8 @@ def load_prefitted_wave(arm='red', wave_path=None, filename=None):
 
     if arm == 'red':
       return ORDER[1:], COEFFS[1:], MATCH_LAM[1:], MATCH_PIX[1:], MATCH_LRES[1:], GUESS_LAM[1:], Y0[1:]
+    elif arm == 'green':
+      return ORDER[2:], COEFFS[2:], MATCH_LAM[2:], MATCH_PIX[2:], MATCH_LRES[2:], GUESS_LAM[2:], Y0[2:]
     else:
       return ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0
 
