@@ -11,7 +11,7 @@ import pickle
 from . import veloce_reduction_tools
 from . import veloce_path
 
-def extract_run_no_blaze(obs_list_filename, run, arm, sim_calib=False, veloce_paths=None, output_path=None):
+def extract_run_no_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False, veloce_paths=None, output_path=None):
     """
     Extracts spectral data from Veloce observations without applying blaze correction.
 
@@ -79,13 +79,13 @@ def extract_run_no_blaze(obs_list_filename, run, arm, sim_calib=False, veloce_pa
                 image_data = hdul[0].data
                 hdr = hdul[0].header
                 # times.append(hdr['MJD-OBS'])
-                image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(image_data, overscan_range=32)
+                image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
+                    image_data, hdr, overscan_range=32, amplifier_mode=amp_mode)
                 extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
                     image_subtracted_bias, traces, summing_ranges, remove_background=False)
-                ### green part needs shift by one order - issue with labeling?
                 if arm == 'green':
                     final_wave = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
-                        extracted_science_orders[1:], Y0[0], COEFFS))
+                        extracted_science_orders, Y0[0], COEFFS))
                     final_flux = np.array(extracted_science_orders[1:])
                 else:
                     final_wave = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
@@ -100,7 +100,7 @@ def extract_run_no_blaze(obs_list_filename, run, arm, sim_calib=False, veloce_pa
                 #     os.path.join(output_path, f"{target}_veloce_{arm}_{filename.split('.')[0]}"),
                 #     wave=final_wave, flux=final_flux, mjd=float(hdr['MJD-OBS']))
                 
-def extract_run_with_blaze(obs_list_filename, run, arm, sim_calib=False, blaze_path=None, veloce_paths=None, output_path=None):
+def extract_run_with_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False, blaze_path=None, veloce_paths=None, output_path=None):
     """
     Extracts spectral data from Veloce observations with blaze correction applied.
 
@@ -179,15 +179,15 @@ def extract_run_with_blaze(obs_list_filename, run, arm, sim_calib=False, blaze_p
                 image_data = hdul[0].data
                 hdr = hdul[0].header
                 # times.append(hdr['MJD-OBS'])
-                image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(image_data, overscan_range=32)
+                image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
+                    image_data, hdr, amplifier_mode=amp_mode, overscan_range=32)
                 extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
                     image_subtracted_bias, traces, summing_ranges, remove_background=False)
-                ### green part needs shift by one order issue with labeling?
                 if arm == 'green':
                     waves = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
-                        extracted_science_orders[1:], Y0[0], COEFFS))
+                        extracted_science_orders, Y0[0], COEFFS))
                     fluxs = np.array(extracted_science_orders[1:])
-                    blazes = blazes[1:]
+                    # blazes = blazes[1:]
                 else:
                     waves = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
                         extracted_science_orders, Y0[0], COEFFS))
@@ -215,7 +215,7 @@ def extract_run_with_blaze(obs_list_filename, run, arm, sim_calib=False, blaze_p
                 #     os.path.join(output_path, f"{target}_veloce_{arm}_{filename.split('.')[0]}"),
                 #     wave=final_wave, flux=final_flux, mjd=float(hdr['MJD-OBS']))
 
-def extract_blaze(file_name, arm, blaze_path=None, master_path=None, veloce_paths=None,):
+def extract_blaze(file_name, arm, amp_mode, blaze_path=None, master_path=None, veloce_paths=None,):
     """
     Extracts blaze function from a master flat field file for a specific spectrograph arm.
 
@@ -248,24 +248,19 @@ def extract_blaze(file_name, arm, blaze_path=None, master_path=None, veloce_path
         blaze_path = veloce_paths.blaze_dir
     if master_path is None:
         master_path = veloce_paths.master_dir
+    
     # load traces
-    trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_trace_{arm}.npz'))
+    trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
     traces, summing_ranges = trace_data['traces'], trace_data['summing_ranges']
-    # adjust summing ranges 
-    ### TODO: take a close look at this summing ranges and prepare files that aren't modified?
-    ### remember that traces can change between runs/nights if someone was fiddling with spectrograph
-    summing_ranges_mod = np.array([[35,35] for _ in range(len(summing_ranges))])
 
     with fits.open(os.path.join(master_path, file_name)) as hdul:
         image_data = hdul[0].data
-        image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(image_data, overscan_range=32)
+        hdr = hdul[0].header
+        image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(image_data, hdr, amplifier_mode=amp_mode, overscan_range=32)
         
-        extracted_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(image_subtracted_bias, traces, summing_ranges_mod, remove_background=False)
-        if arm == 'green':
-            blazes = np.array(extracted_orders[1:])
-        else:
-            blazes = np.array(extracted_orders)
-    np.savez(os.path.join(blaze_path, f"blaze_{file_name.split('.')[0]}"), blazes=blazes)
+        extracted_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(image_subtracted_bias, traces, summing_ranges, remove_background=False)
+
+    np.savez(os.path.join(blaze_path, f"blaze_{file_name.split('.')[0]}"), blazes=np.array(extracted_orders))
 
 if __name__ == '__main__':
     obs_list_filename = "/home/usqobserver2/Joachim_veloce/veloce_reduction/Obs_lists/obs_list_test_HD70703.pkl"
