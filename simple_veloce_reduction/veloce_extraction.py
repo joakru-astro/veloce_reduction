@@ -33,8 +33,6 @@ def extract_run_no_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False,
     - Wave calibration is based on pre-fitted Thorium-Argon (ThAr) lamp observations.
     - Trace data is loaded from a predefined location and may need adjustments for summing ranges,
       especially if the spectrograph setup has been altered.
-    - TODOs indicate future work for adding support for the 'blue' arm and revisiting the handling
-      of summing ranges to accommodate potential changes in the spectrograph setup.
 
     Returns:
     None. The function is designed to perform data extraction and processing, with outputs
@@ -50,22 +48,30 @@ def extract_run_no_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False,
     # standard place were all veloce runs are kept:
     # data_path = '/home/usqobserver2/VeloceData'
     # pick which arm to reduce 
-    ### TODO: add blue arm
-    if arm == 'green':
+    if arm == 'blue':
+        ccd = 'ccd_1'
+    elif arm == 'green':
         ccd = 'ccd_2'
     elif arm == 'red':
         ccd = 'ccd_3'
     else:
         raise ValueError('Unsupported arm')
     
-    # load wave calibration based on ThAr
-    ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_path=veloce_paths.wave_dir)
     # load traces
     if sim_calib:
-        trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
+        # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
+        filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
+        traces = veloce_reduction_tools.Traces.load_traces(filename)
     else:
-        trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
-    traces, summing_ranges = trace_data['traces'], trace_data['summing_ranges']
+        # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
+        filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
+        traces = veloce_reduction_tools.Traces.load_traces(filename)
+    # traces, summing_ranges, wave_calib_slice = \
+    #     trace_data['traces'], trace_data['summing_ranges'], trace_data['wave_calib_slice']
+    # load wave calibration based on ThAr
+    ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
+        veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_calib_slice=traces.wave_calib_slice,
+                                                   wave_path=veloce_paths.wave_dir)
 
     with open(os.path.join(os.path.join(veloce_paths.obs_list_dir, obs_list_filename)), 'rb') as f:
         obs_list = pickle.load(f)
@@ -82,15 +88,18 @@ def extract_run_no_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False,
                 image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
                     image_data, hdr, overscan_range=32, amplifier_mode=amp_mode)
                 extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
-                    image_subtracted_bias, traces, summing_ranges, remove_background=False)
-                if arm == 'green':
-                    final_wave = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
-                        extracted_science_orders, Y0[0], COEFFS))
-                    final_flux = np.array(extracted_science_orders[1:])
-                else:
-                    final_wave = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
-                        extracted_science_orders, Y0[0], COEFFS))
-                    final_flux = np.array(extracted_science_orders)
+                    image_subtracted_bias, traces, remove_background=False)
+                final_wave = veloce_reduction_tools.calibrate_orders_to_wave(
+                    extracted_science_orders, Y0, COEFFS, traces=traces)
+                final_flux = extracted_science_orders
+                # if arm == 'green':
+                #     final_wave = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
+                #         extracted_science_orders, Y0[0], COEFFS))
+                #     final_flux = np.array(extracted_science_orders[1:])
+                # else:
+                #     final_wave = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
+                #         extracted_science_orders, Y0[0], COEFFS))
+                #     final_flux = np.array(extracted_science_orders)
 
                 # save extracted spectrum as fits file
                 fits_filename = os.path.join(output_path, f"{target}_veloce_{arm}_{filename}")
@@ -125,8 +134,6 @@ def extract_run_with_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=Fals
     - Trace data is loaded from a predefined location and may need adjustments for summing ranges,
       especially if the spectrograph setup has been altered.
     - Blaze correction is applied using precomputed blaze functions loaded from a specified or default path.
-    - TODOs indicate future work for adding support for the 'blue' arm and revisiting the handling
-      of summing ranges to accommodate potential changes in the spectrograph setup.
 
     Returns:
     None. The function is designed to perform data extraction and processing, with outputs
@@ -138,24 +145,31 @@ def extract_run_with_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=Fals
         output_path = veloce_paths.extracted_dir
         if not os.path.exists(output_path):
             os.makedirs(output_path)
-    # pick which arm to reduce 
-    ### TODO: add blue arm
-    if arm == 'green':
+
+    if arm == 'blue':
+        ccd = 'ccd_1'
+    elif arm == 'green':
         ccd = 'ccd_2'
     elif arm == 'red':
         ccd = 'ccd_3'
     else:
         raise ValueError('Unsupported arm')
     
-    # load wave calibration based on ThAr
-    ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_path=veloce_paths.wave_dir)
     # load traces
-        # load traces
     if sim_calib:
-        trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
+        # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
+        filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
+        traces = veloce_reduction_tools.Traces.load_traces(filename)
     else:
-        trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
-    traces, summing_ranges = trace_data['traces'], trace_data['summing_ranges']
+        # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
+        filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
+        traces = veloce_reduction_tools.Traces.load_traces(filename)
+    # traces, summing_ranges, wave_calib_slice = \
+    #     trace_data['traces'], trace_data['summing_ranges'], trace_data['wave_calib_slice']
+    # load wave calibration based on ThAr
+    ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
+        veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_calib_slice=traces.wave_calib_slice,
+                                                   wave_path=veloce_paths.wave_dir)
 
     ### load blazes
     if blaze_path in None:
@@ -182,20 +196,23 @@ def extract_run_with_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=Fals
                 image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
                     image_data, hdr, amplifier_mode=amp_mode, overscan_range=32)
                 extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
-                    image_subtracted_bias, traces, summing_ranges, remove_background=False)
-                if arm == 'green':
-                    waves = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
-                        extracted_science_orders, Y0[0], COEFFS))
-                    fluxs = np.array(extracted_science_orders[1:])
-                    # blazes = blazes[1:]
-                else:
-                    waves = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
-                        extracted_science_orders, Y0[0], COEFFS))
-                    fluxs = np.array(extracted_science_orders)
+                    image_subtracted_bias, traces, remove_background=False)
+                waves = veloce_reduction_tools.calibrate_orders_to_wave(
+                    extracted_science_orders, Y0, COEFFS, traces=traces)
+                fluxes = extracted_science_orders
+                # if arm == 'green':
+                #     waves = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
+                #         extracted_science_orders, Y0[0], COEFFS))
+                #     fluxes = np.array(extracted_science_orders[1:])
+                #     # blazes = blazes[1:]
+                # else:
+                #     waves = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
+                #         extracted_science_orders, Y0[0], COEFFS))
+                #     fluxes = np.array(extracted_science_orders)
 
                 final_wave = []
                 final_flux = []
-                for wave, extracted_science_order, blaze in zip(waves, fluxs, blazes):
+                for wave, extracted_science_order, blaze in zip(waves, fluxes, blazes):
                     y = np.array(blaze, dtype=np.float64)
                     ysm = median_filter(y,50)
                     ysm /= max(ysm)
