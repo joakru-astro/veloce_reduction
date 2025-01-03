@@ -1,4 +1,5 @@
 from astropy.io import fits
+import pickle
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -7,6 +8,332 @@ from csaps import csaps
 # from cv2 import connectedComponentsWithStats, merge
 
 from . import veloce_path
+
+import numpy as np
+
+class Traces:
+    """
+    A class to handle and manipulate traces for Veloce reduction.
+    Attributes:
+      traces (list of tuples): Each tuple contains two arrays, the first array is the y values, the second array is the x values.
+      x (list of arrays): The x values of the traces.
+      y (list of arrays): The y values of the traces.
+      summing_ranges_lower (list): Lower bounds of summing ranges.
+      summing_ranges_upper (list): Upper bounds of summing ranges.
+      wave_calib_slice (slice): A slice object to be applied to the precomputed wavelength solution.
+    Methods:
+      __init__(traces=None, x=None, y=None, summing_ranges_lower=None, summing_ranges_upper=None, wave_calib_slice=slice(None)):
+      set_traces(traces):
+        Adds new traces to the traces list.
+      set_traces_yx(y, x):
+      set_summing_range(summing_ranges):
+        Adds new summing ranges to the summing_ranges list.
+      set_wavelength_slice(start, stop):
+      save_traces(arm=None, amp_mode=None, trace_dir=None, filename=None):
+        Saves the traces to a file.
+      refit_traces(frame, fit_width=35, max_iterations=100, tolerance=1e-3, poly_order=5):
+      adjust_traces(frame, fit_width=35, max_iterations=100, tolerance=1e-3):
+        Refines the trace positions in a given image (frame) by iteratively adjusting the trace positions.
+      load_traces(filename):
+        Loads traces from a file.
+    """
+    # TODO: Add order numbers to traces
+    def __init__(self, traces=None, x=None, y=None, summing_ranges_lower=None, summing_ranges_upper=None, wave_calib_slice=slice(None)):
+        """
+        Initializes the Traces object.
+
+        Parameters:
+        - x and y (list of arrays): The x and y values of the traces.
+        - traces (list of tuples): Each tuple contains two arrays, the first array is the y values, the second array is the x values.
+        - summing_ranges (list of tuples, optional): Each tuple contains two integers (pixels to start/end of slice).
+        - wavelength_slice (slice, optional): A slice object to be applied to the precomputed wavelength solution.
+        """
+        if traces is not None:
+            self.traces = traces
+            self.x = [trace[1] for trace in traces]
+            self.y = [trace[0] for trace in traces]
+        elif x is not None and y is not None:
+            self.x = x
+            self.y = y
+            self.traces = [(_y, _x) for _y, _x in zip(y, x)]
+        else:
+            raise ValueError('Please provide traces as a list of tuples or x and y arrays.')
+        if summing_ranges_lower is not None and summing_ranges_upper is not None:
+            self.summing_ranges_lower = summing_ranges_lower
+            self.summing_ranges_upper = summing_ranges_upper
+        else:
+            self.summing_ranges_lower = []
+            self.summing_ranges_upper = []
+        self.wave_calib_slice = wave_calib_slice
+
+    # def __repr__(self):
+    #     return f'Traces(traces={self.traces}, summing_ranges_lower={self.summing_ranges_lower}, summing_ranges_upper={self.summing_ranges_upper}, wave_calib_slice={self.wave_calib_slice})'
+    
+    def __eq__(self, instance):
+        return bool(self.traces == instance.traces 
+                and self.summing_ranges_lower == instance.summing_ranges_lower
+                and self.summing_ranges_upper == instance.summing_ranges_upper
+                and self.wave_calib_slice == instance.wave_calib_slice)
+        
+    def __len__(self):
+        return len(self.traces)
+    
+    def __iter__(self):
+        return zip(self.y, self.x, self.summing_ranges_lower, self.summing_ranges_upper)
+
+    def set_traces(self, traces):
+        """
+        Adds a new traces to the traces list.
+
+        Parameters:
+        - y (array-like): The y values of the trace.
+        - x (array-like): The x values of the trace.
+        """
+        self.traces = traces
+        self.x = [trace[1] for trace in traces]
+        self.y = [trace[0] for trace in traces]
+    
+    def set_traces_yx(self, y, x):
+        """
+        Adds a new trace to the traces list.
+
+        Parameters:
+        - y (array-like): The y values of the trace.
+        - x (array-like): The x values of the trace.
+        """
+        self.x = x
+        self.y = y
+        self.traces = [(_y, _x) for _y, _x in zip(y, x)]
+
+    def set_summing_range(self, summing_ranges):
+        """
+        Adds a new summing range to the summing_ranges list.
+
+        Parameters:
+        - start (int): The starting pixel of the summing range.
+        - end (int): The ending pixel of the summing range.
+        """
+        self.summing_ranges_lower = [summing_range[0] for summing_range in summing_ranges]
+        self.summing_ranges_upper = [summing_range[1] for summing_range in summing_ranges]
+
+    def set_wave_calib_slice(self, start, stop):
+        """
+        Sets the wavelength slice.
+
+        Parameters:
+        - start (int): The starting index of the slice.
+        - stop (int): The stopping index of the slice.
+        """
+        self.wave_calib_slice = slice(start, stop)
+    
+    def save_traces(self, filename=None, trace_dir=None, arm=None, amp_mode=None, sim_calib=False):
+        """
+        Save the trace data to a specified file.
+        
+        Parameters:
+        - filename (str, optional): The name of the file to save the traces, without extension.
+        If not provided, it is generated using `arm` and `amp_mode`.
+        - trace_dir (str, optional): The directory where the trace file will be saved.
+        If not provided, a default directory is used.
+        - arm (str, optional): The arm of the instrument (e.g., 'blue', 'red').
+        Used to generate the filename if not provided.
+        - amp_mode (int, optional): The amplifier mode (e.g., 2, 4).
+        Used to generate the filename if not provided.
+        - sim_calib (bool, optional): Whether the traces are for simultaneous calibration or not.
+        Default is False. Used to generate the filename if not provided.
+        
+        Raises:
+        - ValueError: If neither `filename` nor both `arm` and `amp_mode` are provided.
+        - FileNotFoundError: If the specified `trace_dir` does not exist.
+        
+        Notes:
+        The method saves the trace data, summing ranges, and wave calibration slice to a file
+        using pickle. Using the `filename` parameter overrides the default filename generation
+        and is recommended.
+        """
+        if trace_dir is None:
+            veloce_paths = veloce_path.VelocePaths()
+            trace_dir = veloce_paths.trace_dir
+        if filename:
+            filename = f'{trace_dir}/{filename}.pkl'
+        elif filename is None and arm is not None and amp_mode is not None:
+            if sim_calib:
+                filename = f'{trace_dir}/veloce_{arm}_{amp_mode}amp_sim_calib_trace.pkl'
+            else: 
+                filename = f'{trace_dir}/veloce_{arm}_{amp_mode}amp_no_sim_calib_trace.pkl'
+        else:
+            raise ValueError('Please provide a filename or arm and amp_mode.')
+        
+        if not os.path.exists(trace_dir):
+            raise FileNotFoundError(f'Selected directory {trace_dir} does not exist.')
+        
+        # # Separate y and x values for saving and pad with NaNs
+        # max_length = max(len(_y) for _y in self.y)
+        # y_traces_padded = np.array([np.pad(_y, (0, max_length - len(_y)), constant_values=np.nan) for _y in self.y])
+        # x_traces_padded = np.array([np.pad(_x, (0, max_length - len(_x)), constant_values=np.nan) for _x in self.x])
+
+        summing_ranges = [(lower, upper) for lower, upper in zip(self.summing_ranges_lower, self.summing_ranges_upper)]
+        
+        # np.savez(f'{trace_dir}/{filename}', y_traces_padded=y_traces_padded, x_traces_padded=x_traces_padded, summing_ranges=summing_ranges, wave_calib_slice=self.wave_calib_slice)
+        with open(filename, 'wb') as f:
+            pickle.dump({
+                'traces': self.traces,
+                'summing_ranges': summing_ranges,
+                'wave_calib_slice': self.wave_calib_slice
+            }, f)
+
+    def refit_traces(self, frame, fit_width=35, max_iterations=100, tolerance=1e-3, poly_order=5):
+        """
+        Refines the trace positions in a given image (frame) by iteratively fitting a polynomial to the trace positions.
+        
+        Parameters:
+        - frame (numpy.ndarray): 2D array representing the image frame.
+        - fit_width (int, optional): Width of the region around each trace position to consider for fitting. Default is 35.
+        - max_iterations (int, optional): Maximum number of iterations for the fitting process. Default is 100.
+        - tolerance (float, optional): Convergence tolerance for the fitting process. Default is 1e-3.
+        - poly_order (int, optional): Order of the polynomial to fit to the trace positions. Default is 5.
+        """
+
+        _traces = []
+        ylen, xlen = frame.shape
+        # full_y = range(ylen)
+        for order in range(len(self.x)):
+            fit_x, fit_y = [], []
+            for y, x in zip(self.y[order], self.x[order]):
+                    row = frame[int(y),:].copy()
+                    xmin = max(0,int(x)-fit_width)
+                    xmax = max(0,min(int(x)+fit_width,xlen))
+                    row[:xmin] = 0
+                    row[xmax:] = 0
+                    if np.sum(row) != 0 and x-fit_width>0 and x+fit_width<xlen:
+                        weighted_average = np.average(np.arange(len(row)),weights=row)
+                        fit_x.append(weighted_average)
+                        fit_y.append(y)
+            f = np.polyfit(fit_y,fit_x,poly_order)
+            f_current = np.polyval(f,fit_y)
+            f_prev = f_current
+
+            iteration = 0
+            while iteration < max_iterations:
+                fit_x, fit_y = [], []
+                for y, x in zip(self.y[order], f_prev):
+                    row = frame[int(y),:].copy()
+                    xmin = max(0,int(x)-fit_width)
+                    xmax = max(0,min(int(x)+fit_width,xlen))
+                    row[:xmin] = 0
+                    row[xmax:] = 0
+                    if np.sum(row) != 0 and x-fit_width>0 and x+fit_width<xlen:
+                        weighted_average = np.average(np.arange(len(row)),weights=row)
+                        fit_x.append(weighted_average)
+                        fit_y.append(y)
+                f = np.polyfit(fit_y,fit_x,poly_order)
+                f_current = np.polyval(f,fit_y)
+
+                # Check for convergence
+                if np.max(np.abs(f_current - f_prev)) < tolerance:
+                    break
+                
+                f_prev = f_current
+                iteration += 1
+            _traces.append(f_current)
+        # traces = np.array(sorted(traces, key=lambda x: x[len(x)//2]))
+        self.x = _traces
+        self.traces = [np.array([y, x]) for y, x in zip(self.y, self.x)]
+
+    def adjust_traces(self, frame, fit_width=35, max_iterations=100, tolerance=1e-3, mute=True):
+        """
+        Refines the trace positions in a given image (frame) by iteratively fitting a polynomial to the trace positions.
+        
+        Parameters:
+        - frame (numpy.ndarray): 2D array representing the image frame.
+        - fit_width (int, optional): Width of the region around each trace position to consider for fitting. Default is 35.
+        - max_iterations (int, optional): Maximum number of iterations for the fitting process. Default is 100.
+        - tolerance (float, optional): Convergence tolerance for the fitting process. Default is 1e-3.
+        """
+        # if traces is not None:
+        #     trace_y, trace_x = [trace[0] for trace in traces], [trace[1] for trace in traces]
+        # elif trace_x is None or trace_y is None:
+        #     raise ValueError("Either traces or trace_x and trace_y must be provided.")
+
+        _traces = []
+        ylen, xlen = frame.shape
+        # full_y = range(ylen)
+        for order in range(len(self.x)):
+            iteration = 0
+            x_prev = self.x[order]
+            while iteration < max_iterations:
+                fit_x, fit_y = [], []
+                for y, x in zip(self.y[order], x_prev):
+                    row = frame[int(y),:].copy()
+                    xmin = max(0,int(x)-fit_width)
+                    xmax = max(0,min(int(x)+fit_width,xlen))
+                    row[:xmin] = 0
+                    row[xmax:] = 0
+                    if np.sum(row) != 0 and x-fit_width>0 and x+fit_width<xlen:
+                        weighted_average = np.average(np.arange(len(row)),weights=row)
+                        fit_x.append(weighted_average)
+                        fit_y.append(y)
+                    else:
+                        fit_x.append(np.nan)
+                        fit_y.append(np.nan)
+                if not mute: print(f'Iteration {iteration}: adjustment = {np.nanmedian(x_prev - np.array(fit_x))}')
+                x_current = x_prev - np.nanmedian(x_prev - np.array(fit_x))
+                # Check for convergence
+                if np.sum(np.abs(x_current - x_prev)) < tolerance:
+                    if not mute: print(f'Converged after {iteration} iterations.')
+                    break
+                x_prev = x_current
+                iteration += 1
+            _traces.append(x_current)
+        # traces = np.array(sorted(traces, key=lambda x: x[len(x)//2]))
+        self.x = _traces
+        self.traces = [np.array([y, x]) for y, x in zip(self.y, self.x)]
+
+    @classmethod
+    def load_traces(cls, filename):
+        """
+        Load traces from a specified file.
+        This method reads a file containing trace data and returns an instance of the class
+        with the loaded data. The file is expected to be in binary format and contain a 
+        dictionary with the keys 'traces', 'summing_ranges', and 'wave_calib_slice'.
+        
+        Parameters:
+        - filename (str): The path to the file containing the trace data.
+        
+        Returns:
+        - cls: An instance of the class with the loaded trace data.
+        
+        Raises:
+        - FileNotFoundError: If the specified file does not exist.
+        - ValueError: If no traces are found in the file.
+        """
+        if not os.path.exists(filename):
+            raise FileNotFoundError(f'File {filename} does not exist.')
+        
+        with open(filename, 'rb') as f:
+            data = pickle.load(f)
+
+        if not data['traces']:
+            raise ValueError('No traces found in the file.')
+
+        if data['summing_ranges']:
+            summing_ranges_lower = [summing_range[0] for summing_range in data['summing_ranges']]
+            summing_ranges_upper = [summing_range[1] for summing_range in data['summing_ranges']]
+        else:
+            summing_ranges_lower = []
+            summing_ranges_upper = []
+
+        if data['wave_calib_slice']:
+            wave_calib_slice = data['wave_calib_slice']
+        else:
+            wave_calib_slice = slice(None)
+
+        return cls(
+            traces=data['traces'],
+            summing_ranges_lower=summing_ranges_lower,
+            summing_ranges_upper=summing_ranges_upper,
+            wave_calib_slice=wave_calib_slice
+        )
 
 def remove_overscan_bias(frame, hdr, overscan_range=32, amplifier_mode=4):
     """
@@ -388,7 +715,7 @@ def get_orders_masks(binarized):
 
 #     return orders
 
-def get_traces(frame, orders):
+def get_traces(frame, orders, poly_order=5, fit_width=35, max_iterations=100, tolerance=1e-3):
     """
     Extracts the polynomial fits for spectral order traces from an astronomical image.
 
@@ -412,11 +739,11 @@ def get_traces(frame, orders):
     Note:
     - The function assumes that the input frame and orders are preprocessed and that the orders are correctly
       isolated in the binary masks.
-    - The fit_width parameter (set to 30) determines the horizontal range considered around the initial fit
+    - The fit_width parameter (set to 35) determines the horizontal range considered around the initial fit
       for the refined fitting process. This width may need adjustment based on the specific characteristics
       of the image and the spectral orders.
     """
-    traces = []
+    traces_x, traces_y = [], []
     ylen, xlen = frame.shape
     y = range(ylen)
     for order in orders:
@@ -430,66 +757,39 @@ def get_traces(frame, orders):
                 weighted_average = np.average(np.arange(len(img[i,:])),weights=img[i,:])
                 fit_x.append(weighted_average)
         f = np.polyfit(fit_y,fit_x,2)
-        f = np.polyval(f,y)
-        fit_x = []
-        fit_y = []
-        fit_width = 35 # 35 catches calibration fibers
-        for i in y:
-            row = frame[i,:].copy()
-            xmin = max(0,int(f[i])-fit_width)
-            xmax = max(0,min(int(f[i])+fit_width,xlen))
-            row[:xmin] = 0
-            row[xmax:] = 0
-            if np.sum(row) != 0 and f[i]-fit_width>0 and f[i]+fit_width<xlen:
-                weighted_average = np.average(np.arange(len(row)),weights=row)
-                fit_x.append(weighted_average)
-                fit_y.append(i)
-        f = np.polyfit(fit_y,fit_x,5)
-        f = np.polyval(f,y)
-        traces.append(f)
-    traces = np.array(sorted(traces, key=lambda x: x[2000]))
-    return traces
+        f_prev = np.polyval(f,y)
+        # fit_x = []
+        # fit_y = []
+        iteration = 0
+        while iteration < max_iterations:
+            _fit_x, _fit_y = [], []
+            for i in fit_y:
+                row = frame[i,:].copy()
+                xmin = max(0,int(f_prev[i])-fit_width)
+                xmax = max(0,min(int(f_prev[i])+fit_width,xlen))
+                row[:xmin] = 0
+                row[xmax:] = 0
+                if np.sum(row) != 0 and f_prev[i]-fit_width>0 and f_prev[i]+fit_width<xlen:
+                    weighted_average = np.average(np.arange(len(row)),weights=row)
+                    _fit_x.append(weighted_average)
+                    _fit_y.append(i)
+            f = np.polyfit(_fit_y,_fit_x,poly_order)
+            f_current = np.polyval(f,fit_y)
+            # Check for convergence
+            if np.max(np.abs(f_current - f_prev)) < tolerance:
+                break
+            
+            f_prev = f_current
+            iteration += 1
 
-def refit_traces(frame, trace_x, trace_y):
-    """
-
-    """
-    traces = []
-    ylen, xlen = frame.shape
-    full_y = range(ylen)
-    for order in range(len(trace_x)):
-        fit_x, fit_y = [], []
-        fit_width = 50 # 35 catches calibration fibers
-        for y, x in zip(trace_y[order], trace_x[order]):
-            row = frame[int(y),:].copy()
-            xmin = max(0,int(x)-fit_width)
-            xmax = max(0,min(int(x)+fit_width,xlen))
-            row[:xmin] = 0
-            row[xmax:] = 0
-            if np.sum(row) != 0 and x-fit_width>0 and x+fit_width<xlen:
-                weighted_average = np.average(np.arange(len(row)),weights=row)
-                fit_x.append(weighted_average)
-                fit_y.append(y)
-        f = np.polyfit(fit_y,fit_x,2)
-        f = np.polyval(f,full_y)
-        for y in full_y:
-            row = frame[y,:].copy()
-            xmin = max(0,int(f[y]-fit_width))
-            xmax = max(0,min(int(f[y])+fit_width,xlen))
-            row[:xmin] = 0
-            row[xmax:] = 0
-            if np.sum(row) != 0 and f[y]-fit_width>0 and f[y]+fit_width<xlen:
-                weighted_average = np.average(np.arange(len(row)),weights=row)
-                fit_x.append(weighted_average)
-                fit_y.append(y)
-        f = np.polyfit(fit_y,fit_x,5)
-        f = np.polyval(f,full_y)
-        traces.append(f)
-    traces = np.array(sorted(traces, key=lambda x: x[2000]))
+        traces_x.append(f)
+        traces_y.append(fit_y)
+    
+    traces = [np.array([y, x]) for y, x in sorted(zip(traces_x, traces_y), key=lambda pair: pair[0][len(pair[0])//2])]
     return traces
 
 # def find_summing_range(frame, traces):
-#     # TO DO, asymetric version
+#     # TODO, asymetric version
 #     """
 #     Calculates the optimal summing range for each spectral trace.
 
@@ -598,7 +898,7 @@ def remove_order_background(order, n_pix=5):
     order[order < 0] = 0
     return order
 
-def extract_orders_with_trace(frame, traces, summing_ranges, remove_background=False):
+def extract_orders_with_trace(frame, traces, remove_background=False):
     """
     Extracts spectral orders from an astronomical image frame based on provided trace positions and summing ranges.
 
@@ -634,66 +934,44 @@ def extract_orders_with_trace(frame, traces, summing_ranges, remove_background=F
     extracted_orders = []
     extracted_order_imgs = []
     ylen, xlen = frame.shape
-    y = np.arange(ylen)
-    if isinstance(summing_ranges[0], np.int64):
-        lower_limit = min(traces[0])-summing_ranges[0]-1
-        upper_limit = max(traces[-1])+summing_ranges[1]+1
-    elif len(summing_ranges[0]) == 2:
-        lower_limit = min(traces[0])-summing_ranges[0,0]-1
-        upper_limit = max(traces[-1])+summing_ranges[-1,1]+1
-    if remove_background: lower_limit-=remove_background
+    # y = np.arange(ylen)
+    
+    # if isinstance(traces.summing_ranges_lower[0], np.int64):
+    lower_limit = min(traces.x[0]) - traces.summing_ranges_lower[0]-1
+    upper_limit = max(traces.x[-1]) + traces.summing_ranges_upper[1]+1
+    # elif len(summing_ranges[0]) == 2:
+    #     lower_limit = min(traces[0])-summing_ranges[0,0]-1
+    #     upper_limit = max(traces[-1])+summing_ranges[-1,1]+1
+    if remove_background:
+        lower_limit-=remove_background
+        upper_limit+=remove_background
     
     if upper_limit > xlen:
         offset = int(np.ceil(upper_limit))
-        buffer = np.zeros((len(y), offset))
+        buffer = np.zeros((ylen, offset))
         frame = np.concatenate((frame, buffer), axis=1)
     if lower_limit < 0:
         offset = int(-1*np.floor(lower_limit))
-        buffer = np.zeros((len(y), offset))
+        buffer = np.zeros((ylen, offset))
         frame = np.concatenate((buffer, frame), axis=1)
     else:
         offset = 0
-    for trace, summing_range in zip(traces, summing_ranges):
-        if isinstance(summing_range, np.int64):
-            lower_range, upper_range = summing_range, summing_range
-        elif len(summing_range) == 2:
-            lower_range, upper_range = summing_range
+    for y, x, lower_range, upper_range in traces:
+        # if isinstance(summing_range, np.int64):
+        #     lower_range, upper_range = summing_range, summing_range
+        # elif len(summing_range) == 2:
+        #     lower_range, upper_range = summing_range
         if remove_background:
             lower_range += remove_background
             upper_range += remove_background
-        extracted_order_img = np.array([frame[yval, int(xval-lower_range+offset):int(xval+upper_range+1+offset)] for yval, xval in zip(y, trace)])
+        extracted_order_img = np.array([frame[int(yval), int(xval-lower_range+offset):int(xval+upper_range+1+offset)] for yval, xval in zip(y, x)])
         if remove_background: extracted_order_img = remove_order_background(extracted_order_img, n_pix=remove_background)
         extracted_order_imgs.append(extracted_order_img)
         extracted_orders.append(np.sum(extracted_order_img, axis=1))
-    extracted_orders = np.array(extracted_orders, dtype=np.float64)
+    # extracted_orders = np.array(extracted_orders, dtype=np.float64)
     return extracted_orders, extracted_order_imgs
 
-### old version
-# def extract_orders(frame, traces, summing_ranges):
-#     ylen, xlen = frame.shape
-#     y = np.arange(ylen)
-#     extracted_orders = []
-#     for trace, summing_range in zip(traces, summing_ranges):
-#         if isinstance(summing_range, np.int64):
-#             lower_range, upper_range = summing_range, summing_range
-#         elif len(summing_range) == 2:
-#             lower_range, upper_range = summing_range
-#         extracted_order = []
-#         for i in y:
-#             row = frame[i,:].copy()
-#             xmin = max(0,int(trace[i])-lower_range)
-#             xmax = max(0, min(int(trace[i])+upper_range,xlen))
-#             if xmin != xmax:
-#                 row[:xmin] = 0
-#                 row[xmax:] = 0
-#                 extracted_order.append(np.sum(row))
-#             else:
-#                 extracted_order.append(0)    
-#         extracted_orders.append(extracted_order)    
-#     extracted_orders = np.array(extracted_orders, dtype=np.uint32)
-#     return extracted_orders
-
-def plot_order_cross_section(frame, traces, summing_range, order, plot_type='median', margin=[10,10]):
+def plot_order_cross_section(frame, traces, order, plot_type='median', margin=[10,10]):
     """
     Plots a cross-section of a spectral order from a 2D frame.
 
@@ -728,35 +1006,35 @@ def plot_order_cross_section(frame, traces, summing_range, order, plot_type='med
     """
     
     lower_margin, upper_margin = margin[0], margin[1]
-    if isinstance(summing_range, int):
-        lower_range, upper_range = summing_range, summing_range+1
-    elif len(summing_range) == 2:
-        lower_range, upper_range = summing_range
+    # if isinstance(summing_range, int):
+    lower_range, upper_range = traces.summing_ranges_lower[order], traces.summing_ranges_upper[order]+1
+    # elif len(summing_range) == 2:
+    #     lower_range, upper_range = summing_range
         # upper_range += 1
-    else:
-        raise TypeError("Incorrect summing range, must be int or 2-element list.")
+    # else:
+    #     raise TypeError("Incorrect summing range, must be int or 2-element list.")
     
     ylen, xlen = frame.shape
 
-    trace = traces[order].copy()
-    y = np.arange(ylen)
-    lower_limit = min(trace)-lower_range-lower_margin
-    upper_limit = max(trace)+upper_range+upper_margin
+    # trace_y, trace_x = traces[order]
+    # y = np.arange(ylen)
+    lower_limit = min(traces.x[order])-lower_range-lower_margin
+    upper_limit = max(traces.x[order])+upper_range+upper_margin
 
     if upper_limit > xlen:
         offset = int(np.ceil(upper_limit))
-        buffer = np.zeros((len(y), offset))
+        buffer = np.zeros((ylen, offset))
         frame = np.concatenate((frame, buffer), axis=1)
     if lower_limit < 0:
         offset = int(-1*np.floor(lower_limit))
         # trace += offset
-        buffer = np.zeros((len(y), offset))
+        buffer = np.zeros((ylen, offset))
         frame = np.concatenate((buffer, frame), axis=1)
     else:
         offset = 0
 
-    extracted_order_img = np.array([frame[yval, int(np.round(xval-lower_range-lower_margin, 0)+offset):int(np.round(xval+upper_range+upper_margin, 0)+offset)] 
-                                            for yval, xval in zip(y, trace)])
+    extracted_order_img = np.array([frame[int(yval), int(np.round(xval-lower_range-lower_margin, 0)+offset):int(np.round(xval+upper_range+upper_margin, 0)+offset)] 
+                                            for yval, xval in zip(*traces.traces[order])])
 
     # x = np.arange(-lower_range-lower_margin,upper_range+upper_margin)
     x = np.arange(-lower_range-lower_margin,upper_range+upper_margin)
@@ -781,32 +1059,6 @@ def plot_order_cross_section(frame, traces, summing_range, order, plot_type='med
     plt.ylabel("Counts")
 
     return extracted_order_img
-
-# if arm == 'red':
-#     trace_data = np.load('veloce_extracted_trace_red.npz')
-# elif arm == 'green':
-#     trace_data = np.load('veloce_extracted_trace_green.npz')
-# else:
-#     raise ValueError('Unknown arm. Must be "red" or "green"')
-# traces, summing_ranges, blazes = trace_data['traces'], trace_data['summing_ranges'], trace_data['extracted_orders']
-
-# ### calibration fibers traces? they don't match well to collected data 
-
-# ### Order ymin ymax
-# ### Coeff0 Coeff1 Coeff2 … Coeffn
-# ### X1 X2 X3 … Xi
-# ### Y1 Y1 Y3 … Yi
-
-# filename = 'rosso-lc-m65-104-all.trace'
-
-# with open(filename, 'r') as file:
-#     lines = [line[:-1] for line in file]
-    
-# head_list = np.array([line.split() for line in lines[::4]])
-# Order, Ymin, Ymax = head_list[:,0], head_list[:,1], head_list[:,2]
-# coef_list = np.array([line.split() for line in lines[1::4]], dtype=np.float64)
-# X = [np.array(line.split(), dtype=np.float64) for line in lines[2::4]]
-# Y = [np.array(line.split(), dtype=np.float64) for line in lines[3::4]]
 
 def load_prefitted_wavecalib_trace(arm='red', calib_type='Th', trace_path=None, filename=None):
   """
@@ -858,13 +1110,14 @@ def load_prefitted_wavecalib_trace(arm='red', calib_type='Th', trace_path=None, 
           lines = [line[:-1] for line in file]
           ORDER = np.array([line.split()[0] for line in lines[::4]], dtype=np.uint8)
           COEFFS = [np.array(line.split()[1:], dtype=np.float64) for line in lines[1::4]]
-          Y = [np.array(line.split(), dtype=np.float64) for line in lines[2::4]]
-          X = [np.array(line.split(), dtype=np.float64) for line in lines[3::4]]
+          X = [np.array(line.split(), dtype=np.float64) for line in lines[2::4]]
+          Y = [np.array(line.split(), dtype=np.float64) for line in lines[3::4]]
   except FileNotFoundError:
       raise FileNotFoundError(f"File {filename} not found in {trace_path}.")
-  return ORDER, COEFFS, Y, X
+  traces = [np.array([y, x]) for y, x in zip(Y, X)]
+  return ORDER, COEFFS, traces
 
-def load_prefitted_wave(arm='red', wave_path=None, filename=None):
+def load_prefitted_wave(arm='red', wave_calib_slice=slice(None), wave_path=None, filename=None):
     """
     Loads pre-fitted thorium-argon (ThAr) calibration data for a specified spectrograph arm.
 
@@ -927,14 +1180,9 @@ def load_prefitted_wave(arm='red', wave_path=None, filename=None):
     GUESS_LAM = [np.array(line.split()[1:], dtype=np.float64) for line in lines[7::9]]
     Y0 = np.array([line.split()[-1] for line in lines[1::9]], dtype=np.uint16)
 
-    if arm == 'red':
-      return ORDER[1:], COEFFS[1:], MATCH_LAM[1:], MATCH_PIX[1:], MATCH_LRES[1:], GUESS_LAM[1:], Y0[1:]
-    elif arm == 'green':
-      return ORDER[2:], COEFFS[2:], MATCH_LAM[2:], MATCH_PIX[2:], MATCH_LRES[2:], GUESS_LAM[2:], Y0[2:]
-    else:
-      return ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0
+    return ORDER[wave_calib_slice], COEFFS[wave_calib_slice], MATCH_LAM[wave_calib_slice], MATCH_PIX[wave_calib_slice], MATCH_LRES[wave_calib_slice], GUESS_LAM[wave_calib_slice], Y0[wave_calib_slice]
 
-def calibrate_orders_to_wave(orders, Y0, coefficients):
+def calibrate_orders_to_wave(orders, Y0, coefficients, traces=None):
     """
     Converts pixel positions to wavelengths for each spectral order using polynomial coefficients.
 
@@ -960,14 +1208,18 @@ def calibrate_orders_to_wave(orders, Y0, coefficients):
     - The polynomial is applied as wave = sum(coeff[j] * (x_arr**j)) for each coefficient j in an order, where
       x_arr is the array of adjusted pixel positions.
     """
-    x_arr = np.arange(len(orders[0]), dtype=np.float64)-Y0
+    if traces is not None:
+        y_arr = [trace-y0 for trace, y0 in zip(traces.y, Y0)] 
+    else:
+        y_arr = [np.arange(len(order), dtype=np.float64)-y0 for order, y0 in zip(orders, Y0)]
+    # x_arr = np.arange(len(orders[0]), dtype=np.float64)-Y0
     WAVE = []
     for i in range(len(orders)):
-        wave = np.zeros_like(x_arr, dtype=np.float64)
+        wave = np.zeros_like(y_arr[i], dtype=np.float64)
         for j, coeff in enumerate(coefficients[i]):
-            wave += (x_arr**j)*coeff
+            wave += (y_arr[i]**j)*coeff
         WAVE.append(wave)
-    WAVE = np.array(WAVE)
+    # WAVE = np.array(WAVE)
     return WAVE
 
 def get_master(obs_list, master_type, data_path, run, date, arm):
@@ -1008,6 +1260,58 @@ def get_master(obs_list, master_type, data_path, run, date, arm):
                     frames = np.array(hdul[0].data)
 
     return np.median(frames, axis=2)
+
+def get_master_mmap(obs_list, master_type, data_path, run, date, arm):
+    """
+    Generates a master frame by median combining individual frames for a given observation type and date using memory-mapped files.
+
+    Parameters:
+    - obs_list (dict): A nested dictionary where the first key is the master type (e.g., 'bias', 'flat'), the
+      second key is the date, and the value is a list of file names for that observation type and date.
+    - master_type (str): The type of master frame to generate (e.g., 'bias', 'flat').
+    - data_path (str): The base path to the directory containing the observation data.
+    - run (str): The observing run identifier, used to further specify the location of the data.
+    - date (str): The date of the observation, used to select the correct set of files from the observation list.
+    - arm (str): The spectral arm ('red', 'green', 'blue') of the data to process, which determines the CCD to use.
+
+    Returns:
+    - numpy.ndarray: A 2D numpy array representing the median-combined master frame for the specified observation
+      type, date, and spectral arm.
+
+    Raises:
+    - KeyError: If the specified `arm` is not one of 'red', 'green', or 'blue'.
+    - FileNotFoundError: If any of the FITS files specified in the observation list cannot be found at the
+      constructed file path.
+    """
+    data_sub_dirs = {'red': 'ccd_3', 'green': 'ccd_2', 'blue': 'ccd_1'}
+    file_list = obs_list[master_type][date]
+    num_files = len(file_list)
+
+    if num_files == 0:
+        raise ValueError("No files found for the specified master type and date.")
+
+    # Read the first file to get the shape of the data
+    first_file = os.path.join(data_path, run, date, data_sub_dirs[arm], file_list[0])
+    with fits.open(first_file) as hdul:
+        frame_shape = hdul[0].data.shape
+
+    # Create a memory-mapped file to store the frames
+    mmap_file = np.memmap('frames.dat', dtype='float32', mode='w+', shape=(num_files, *frame_shape))
+
+    # Read each FITS file and store the data in the memory-mapped file
+    for i, file_name in enumerate(file_list):
+        fits_image_filename = os.path.join(data_path, run, date, data_sub_dirs[arm], file_name)
+        with fits.open(fits_image_filename) as hdul:
+            mmap_file[i] = hdul[0].data
+
+    # Calculate the median along the first axis
+    master_frame = np.median(mmap_file, axis=0)
+
+    # Clean up the memory-mapped file
+    del mmap_file
+    os.remove('frames.dat')
+
+    return master_frame
 
 def save_image_fits(filename, output_path, image, hdr):
     """
@@ -1061,8 +1365,16 @@ def save_extracted_spectrum_fits(filename, output_path, wave, flux, hdr):
     - The function assumes that the Astropy package is installed and that the FITS file will be saved in the
       specified output directory.
     """
-    hdu_wave = fits.ImageHDU(wave, name='WAVE')
-    hdu_flux = fits.ImageHDU(flux, name='FLUX')
+    if all(len(order) == len(wave[0]) for order in wave):
+        hdu_wave = fits.ImageHDU(wave, name='WAVE')
+        hdu_flux = fits.ImageHDU(flux, name='FLUX')
+    else:
+        max_length = max(len(order) for order in wave)
+        wave_padded = np.array([np.pad(order, (0, max_length - len(order)), constant_values=np.nan) for order in wave])
+        flux_padded = np.array([np.pad(order, (0, max_length - len(order)), constant_values=np.nan) for order in flux])
+        hdu_wave = fits.ImageHDU(wave_padded, name='WAVE')
+        hdu_flux = fits.ImageHDU(flux_padded, name='FLUX')
+    
     hdul = fits.HDUList([fits.PrimaryHDU(), hdu_wave, hdu_flux])
     hdul[0].header = hdr
     output_filename = os.path.join(output_path, filename)

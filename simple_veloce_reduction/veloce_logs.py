@@ -1,12 +1,58 @@
 import astropy
 from astropy.io import fits
-import os
+import os, re
 # import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
 
 from . import veloce_path
+
+from datetime import datetime
+
+def format_date(date_str):
+    # Parse the date string using datetime.strptime
+    date_obj = datetime.strptime(date_str, '%y%m%d')
+    
+    # Format the date object to the desired format
+    formatted_date = date_obj.strftime('%d%b').lower()
+    
+    return formatted_date
+
+def load_run_logs(run, science_targets, arm, calib_type=None, veloce_paths=None):
+    if veloce_paths is None:
+        veloce_paths = veloce_path.VelocePaths(run)
+        veloce_paths.__post_init__()
+    veloce_paths.raw_dir
+
+    # Define the regular expression pattern for YYMMDD format
+    date_pattern = re.compile(r'^\d{6}$')
+
+    # Use list comprehension to filter and sort directories
+    dates = sorted(
+        [item for item in os.listdir(veloce_paths.raw_dir)
+         if os.path.isdir(os.path.join(veloce_paths.raw_dir, item)) and date_pattern.match(item)])
+    
+    days = [format_date(date) for date in dates]
+
+    obs_list = {'science': {},
+            'flat_red': {},
+            'flat_green': {},
+            'flat_blue': {},
+            'flat_blue_long': {},
+            'dark': {},
+            'bias': {},
+            'wave_calib': {}}
+    
+    for day, date in zip(days, dates):
+        log_path = os.path.join(veloce_paths.raw_parent_dir, run, date)
+        log_name = [name for name in os.listdir(log_path) if name.split('.')[-1] == 'log'][0]
+        log_path = os.path.join(log_path, log_name)
+        temp_obs_list = load_log_info(log_path, science_targets, arm, day, calib_type)
+        for key in temp_obs_list:
+            obs_list[key][date] = temp_obs_list[key]
+
+    return obs_list
 
 def load_log_info(log_path, science_targets, selected_arm, day, calib_type):
     """
@@ -33,7 +79,9 @@ def load_log_info(log_path, science_targets, selected_arm, day, calib_type):
       and 10.0s for 'flat_blue').
     """
     # obs_list = {'flat': [], 'dark': [], 'bias': [], 'science': [], 'wave_calib': []}
-    obs_list = {'flat_red': [], 'flat_green': [], 'flat_blue': [], 'dark': [], 'bias': [], 'science': [], 'wave_calib': []}
+    obs_list = {'flat_red': [], 'flat_green': [], 'flat_blue': [],
+                'flat_blue_long': [],  'dark': [], 'bias': [],
+                'science': [], 'wave_calib': []}
     arms = {'red': 3, 'green': 2, 'blue': 1}
     with open(log_path, 'r') as f:
         lines = f.readlines()
@@ -51,6 +99,8 @@ def load_log_info(log_path, science_targets, selected_arm, day, calib_type):
                             obs_list['flat_green'].append(file_name)
                         elif float(exp_time) == 10.0:
                             obs_list['flat_blue'].append(file_name)
+                        elif float(exp_time) == 60.0:
+                            obs_list['flat_blue_long'].append(file_name)
                         else:
                             pass
                             # print(f"[Warning]: Non standard flat exp time = {exp_time} for {file_name}")
@@ -58,7 +108,7 @@ def load_log_info(log_path, science_targets, selected_arm, day, calib_type):
                         obs_list['wave_calib'].append(file_name)
                     elif target.strip() == 'DarkFrame':
                         obs_list['dark'].append(file_name)
-                    elif target.strip() in science_targets:
+                    elif target.strip() in science_targets or science_targets is None:
                         obs_list['science'].append([target.strip(), file_name])
                     else:
                         pass
