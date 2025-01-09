@@ -937,8 +937,8 @@ def extract_orders_with_trace(frame, traces, remove_background=False):
     # y = np.arange(ylen)
     
     # if isinstance(traces.summing_ranges_lower[0], np.int64):
-    lower_limit = min(traces.x[0]) - traces.summing_ranges_lower[0]-1
-    upper_limit = max(traces.x[-1]) + traces.summing_ranges_upper[1]+1
+    lower_limit = min([min(x) for x in traces.x]) - traces.summing_ranges_lower[0]-1
+    upper_limit = max([max(x) for x in traces.x]) + traces.summing_ranges_upper[1]+1
     # elif len(summing_ranges[0]) == 2:
     #     lower_limit = min(traces[0])-summing_ranges[0,0]-1
     #     upper_limit = max(traces[-1])+summing_ranges[-1,1]+1
@@ -956,6 +956,7 @@ def extract_orders_with_trace(frame, traces, remove_background=False):
         frame = np.concatenate((buffer, frame), axis=1)
     else:
         offset = 0
+    # i = 0
     for y, x, lower_range, upper_range in traces:
         # if isinstance(summing_range, np.int64):
         #     lower_range, upper_range = summing_range, summing_range
@@ -965,10 +966,22 @@ def extract_orders_with_trace(frame, traces, remove_background=False):
             lower_range += remove_background
             upper_range += remove_background
         extracted_order_img = np.array([frame[int(yval), int(xval-lower_range+offset):int(xval+upper_range+1+offset)] for yval, xval in zip(y, x)])
+        # if len(set([len(row) for row in extracted_order_img])) != 1:
+        #     print("order number {} of width {}:".format(i, len(extracted_order_img[0])))
+        #     for row in extracted_order_img:
+        #         print(len(row))
         if remove_background: extracted_order_img = remove_order_background(extracted_order_img, n_pix=remove_background)
         extracted_order_imgs.append(extracted_order_img)
         extracted_orders.append(np.sum(extracted_order_img, axis=1))
+        # i+=1
     # extracted_orders = np.array(extracted_orders, dtype=np.float64)
+    # padding solves shape issue?
+    max_shape = tuple(max(img_array.shape[dim] for img_array in extracted_order_imgs) for dim in range(2))
+    extracted_order_imgs = np.array([np.pad(img_array, 
+                                    ((0, max_shape[0] - img_array.shape[0]), 
+                                    (0, max_shape[1] - img_array.shape[1])), 
+                                    constant_values=np.nan) 
+                                    for img_array in extracted_order_imgs])
     return extracted_orders, extracted_order_imgs
 
 def plot_order_cross_section(frame, traces, order, plot_type='median', margin=[10,10]):
@@ -1258,8 +1271,11 @@ def get_master(obs_list, master_type, data_path, run, date, arm):
                     frames = np.dstack((frames, hdul[0].data))
                 except:
                     frames = np.array(hdul[0].data)
+                    # Load placeholder header from the first file 
+                    # TODO: edit header to reflect that it is a median combined frame
+                    header = hdul[0].header
 
-    return np.median(frames, axis=2)
+    return np.median(frames, axis=2), header
 
 def get_master_mmap(obs_list, master_type, data_path, run, date, arm):
     """
@@ -1295,6 +1311,11 @@ def get_master_mmap(obs_list, master_type, data_path, run, date, arm):
     with fits.open(first_file) as hdul:
         frame_shape = hdul[0].data.shape
 
+    # Load placeholder header from the first file 
+    # TODO: edit header to reflect that it is a median combined frame
+    with fits.open(first_file) as hdul:
+        header = hdul[0].header
+
     # Create a memory-mapped file to store the frames
     mmap_file = np.memmap('frames.dat', dtype='float32', mode='w+', shape=(num_files, *frame_shape))
 
@@ -1311,7 +1332,7 @@ def get_master_mmap(obs_list, master_type, data_path, run, date, arm):
     del mmap_file
     os.remove('frames.dat')
 
-    return master_frame
+    return master_frame, header
 
 def save_image_fits(filename, output_path, image, hdr):
     """
@@ -1376,6 +1397,12 @@ def save_extracted_spectrum_fits(filename, output_path, wave, flux, hdr):
         hdu_flux = fits.ImageHDU(flux_padded, name='FLUX')
     
     hdul = fits.HDUList([fits.PrimaryHDU(), hdu_wave, hdu_flux])
+    # hdr['NAXIS1'] = wave.shape[1]
+    # hdr['NAXIS2'] = wave.shape[0]
+    # hdr['NAXIS3'] = 2
+    # hdr['CTYPE1'] = 'Wavelength'
+    # hdr['CTYPE2'] = 'Flux'
+    # hdr['CUNIT1'] = 'Nm'
     hdul[0].header = hdr
     output_filename = os.path.join(output_path, filename)
     hdul.writeto(output_filename, overwrite=True)
