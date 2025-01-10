@@ -44,9 +44,7 @@ def extract_run_no_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False,
         output_path = veloce_paths.extracted_dir
         if not os.path.exists(output_path):
             os.makedirs(output_path)
-
-    # standard place were all veloce runs are kept:
-    # data_path = '/home/usqobserver2/VeloceData'
+            
     # pick which arm to reduce 
     if arm == 'blue':
         ccd = 'ccd_1'
@@ -84,30 +82,18 @@ def extract_run_no_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False,
             with fits.open(spectrum_filename) as hdul:
                 image_data = hdul[0].data
                 hdr = hdul[0].header
-                # times.append(hdr['MJD-OBS'])
                 image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
                     image_data, hdr, overscan_range=32, amplifier_mode=amp_mode)
-                extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
+                flux, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
                     image_subtracted_bias, traces, remove_background=False)
-                final_wave = veloce_reduction_tools.calibrate_orders_to_wave(
+                vacuum_wave = veloce_reduction_tools.calibrate_orders_to_wave(
                     extracted_science_orders, Y0, COEFFS, traces=traces)
-                final_flux = extracted_science_orders
-                # if arm == 'green':
-                #     final_wave = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
-                #         extracted_science_orders, Y0[0], COEFFS))
-                #     final_flux = np.array(extracted_science_orders[1:])
-                # else:
-                #     final_wave = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
-                #         extracted_science_orders, Y0[0], COEFFS))
-                #     final_flux = np.array(extracted_science_orders)
+                air_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
 
                 # save extracted spectrum as fits file
                 fits_filename = os.path.join(output_path, f"{target}_veloce_{arm}_{filename}")
                 veloce_reduction_tools.save_extracted_spectrum_fits(
                     filename=fits_filename, output_path=output_path, wave=final_wave, flux=final_flux, hdr=hdr)
-                # np.savez(
-                #     os.path.join(output_path, f"{target}_veloce_{arm}_{filename.split('.')[0]}"),
-                #     wave=final_wave, flux=final_flux, mjd=float(hdr['MJD-OBS']))
                 
 def extract_run_with_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False, blaze_path=None, veloce_paths=None, output_path=None):
     """
@@ -172,9 +158,10 @@ def extract_run_with_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=Fals
                                                    wave_path=veloce_paths.wave_dir)
 
     ### load blazes
-    if blaze_path in None:
+    if blaze_path is None:
         blaze_path = os.path.join(veloce_paths.blaze_dir, f'veloce_blaze_{arm}_pix.npz')
-    blazes = np.load(blaze_path)
+    with open(blaze_path, 'rb') as f:
+        blazes = pickle.load(f)
     blazes = blazes['blazes']
 
     with open(os.path.join(veloce_paths.obs_list_dir, obs_list_filename), 'rb') as f:
@@ -183,7 +170,6 @@ def extract_run_with_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=Fals
     # number of pixels to discard from both sides
     # (so only well wave calibrated high snr part in the middle is left)
     cutoff = 1250
-    # pix_max = 4112
     for date in obs_list.keys(): 
         for obs in obs_list[date]:
             target, filename = obs
@@ -216,21 +202,17 @@ def extract_run_with_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=Fals
                     y = np.array(blaze, dtype=np.float64)
                     ysm = median_filter(y,50)
                     ysm /= max(ysm)
-                    flux = extracted_science_order.copy()
-                    flux /= ysm
+                    flux = extracted_science_order/ysm
                     flux /= np.median(flux)
-                    final_wave.append(wave[cutoff:-cutoff])
+                    final_wave.append(veloce_reduction_tools.vacuum_to_air(wave[cutoff:-cutoff]))
                     final_flux.append(flux[cutoff:-cutoff])
-                final_wave = np.array(final_wave)
-                final_flux = np.array(final_flux)
+                # final_wave = np.array(final_wave)
+                # final_flux = np.array(final_flux)
 
                 # save extracted spectrum as fits file
                 fits_filename = os.path.join(output_path, f"{target}_veloce_{arm}_{filename}")
                 veloce_reduction_tools.save_extracted_spectrum_fits(
                     filename=fits_filename, output_path=output_path, wave=final_wave, flux=final_flux, hdr=hdr)
-                # np.savez(
-                #     os.path.join(output_path, f"{target}_veloce_{arm}_{filename.split('.')[0]}"),
-                #     wave=final_wave, flux=final_flux, mjd=float(hdr['MJD-OBS']))
 
 def extract_blaze(file_name, arm, amp_mode, blaze_path=None, master_path=None, veloce_paths=None,):
     """
@@ -277,7 +259,9 @@ def extract_blaze(file_name, arm, amp_mode, blaze_path=None, master_path=None, v
         
         extracted_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(image_subtracted_bias, traces, summing_ranges, remove_background=False)
 
-    np.savez(os.path.join(blaze_path, f"blaze_{file_name.split('.')[0]}"), blazes=np.array(extracted_orders))
+    file_name = os.path.join(blaze_path, f"blaze_{file_name.split('.')[0]}.pkl")
+    with open(file_name, "wb") as f:
+        pickle.dump({'blazes': extracted_orders}, f)
 
 if __name__ == '__main__':
     obs_list_filename = "/home/usqobserver2/Joachim_veloce/veloce_reduction/Obs_lists/obs_list_test_HD70703.pkl"
