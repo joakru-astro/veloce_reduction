@@ -5,7 +5,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import median_filter, label, find_objects
 from csaps import csaps
-# from cv2 import connectedComponentsWithStats, merge
 
 from . import veloce_path
 
@@ -1205,35 +1204,26 @@ def calibrate_orders_to_wave(orders, Y0, coefficients, traces=None):
     The transformation accounts for a starting y-coordinate (Y0) offset before applying the polynomial coefficients.
 
     Parameters:
-    - orders (list of numpy.ndarray): A list of 2D numpy arrays, each representing a spectral order. Only the
-      length of the first order is used to generate an array of pixel positions.
-    - Y0 (int or float): The starting y-coordinate for the spectral orders, used to adjust the pixel positions
-      before applying the wavelength calibration.
-    - coefficients (list of list of floats): A list where each element is a list of polynomial coefficients
-      for converting pixel positions to wavelengths for a corresponding spectral order.
-
+    - orders (list of numpy.ndarray): A list of numpy arrays, each representing a spectral order.
+        The length of each order is used to generate an array of pixel positions if traces are not provided.
+    - Y0 (lis): The list of starting y-coordinates for the spectral orders, used to adjust the pixel positions
+        before applying the wavelength calibration.
+    - coefficients (list of list): A list where each element is a list of polynomial coefficients
+        for converting pixel positions to wavelengths for a corresponding spectral order.
+    - traces (optional, instance of trace): A list of 1D numpy arrays representing the trace positions for
+        each spectral order. If provided, these traces are used to adjust the pixel positions instead of a simple
+        range array.
+      
     Returns:
-    - numpy.ndarray: A 2D numpy array where each row corresponds to a spectral order and contains the wavelengths
-      for each pixel position in that order.
-
-    Note:
-    - The function assumes that all spectral orders have the same length as the first order in the `orders` list.
-    - The polynomial is applied as wave = sum(coeff[j] * (x_arr**j)) for each coefficient j in an order, where
-      x_arr is the array of adjusted pixel positions.
+    - wave (list): A list of numpy arrays where each row corresponds to a spectral order and contains the wavelengths
+        for each pixel position in that order.
     """
     if traces is not None:
         y_arr = [trace-y0 for trace, y0 in zip(traces.y, Y0)] 
     else:
         y_arr = [np.arange(len(order), dtype=np.float64)-y0 for order, y0 in zip(orders, Y0)]
-    # x_arr = np.arange(len(orders[0]), dtype=np.float64)-Y0
-    WAVE = []
-    for i in range(len(orders)):
-        wave = np.zeros_like(y_arr[i], dtype=np.float64)
-        for j, coeff in enumerate(coefficients[i]):
-            wave += (y_arr[i]**j)*coeff
-        WAVE.append(wave)
-    # WAVE = np.array(WAVE)
-    return WAVE
+    wave = [np.polyval(coeff[::-1], y) for y, coeff in zip(y_arr, coefficients)]
+    return wave
 
 def get_master(obs_list, master_type, data_path, run, date, arm):
     """
