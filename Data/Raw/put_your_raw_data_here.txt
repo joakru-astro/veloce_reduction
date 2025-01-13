@@ -1,1 +1,0 @@
-The default location for the raw data in veloce_path.py, edit paths in that file to use different location.
