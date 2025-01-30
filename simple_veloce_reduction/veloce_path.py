@@ -10,14 +10,16 @@ class VelocePaths:
         self.wave_dir = os.path.join(self.reduction_parent_dir, 'Wave')
         self.trace_dir = os.path.join(self.reduction_parent_dir, 'Trace')
         self.blaze_dir = os.path.join(self.reduction_parent_dir, 'Blaze')
-        self.master_dir = os.path.join(self.reduction_parent_dir, 'Master_data')
+        self.master_dir = os.path.join(self.reduction_parent_dir, 'Master')
         self.obs_list_dir = os.path.join(self.reduction_parent_dir, 'Obs_lists')
         self.run = run
+        if self.run is not None:
+            self.__post_init__()
 
     def __post_init__(self):
-        if self.run is not None:
-            self.raw_dir = os.path.join(self.raw_parent_dir, f'{self.run}/')
-            self.extracted_dir = os.path.join(self.extracted_parent_dir, f'{self.run}/')
+        # if self.run is not None:
+        self.raw_dir = os.path.join(self.raw_parent_dir, f'{self.run}/')
+        self.extracted_dir = os.path.join(self.extracted_parent_dir, f'{self.run}/')
 
     def update_run(self, run):
         self.run = run
