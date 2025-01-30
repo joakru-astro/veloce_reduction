@@ -277,7 +277,7 @@ class Traces:
                         fit_x.append(np.nan)
                         fit_y.append(np.nan)
                 if not mute: print(f'Iteration {iteration}: adjustment = {np.nanmedian(x_prev - np.array(fit_x))}')
-                x_current = x_prev - np.nanmedian(x_prev - np.array(fit_x))
+                x_current = x_prev + np.nanmedian(np.array(fit_x) - x_prev)
                 # Check for convergence
                 if np.sum(np.abs(x_current - x_prev)) < tolerance:
                     if not mute: print(f'Converged after {iteration} iterations.')
@@ -1430,7 +1430,7 @@ def save_extracted_spectrum_fits(filename, output_path, wave, flux, hdr):
         hdu_wave = fits.ImageHDU(wave, name='WAVE')
         hdu_flux = fits.ImageHDU(flux, name='FLUX')
     else:
-        max_length = max(len(order) for order in wave)
+        max_length = max([len(order) for order in wave])
         wave_padded = np.array([np.pad(order, (0, max_length - len(order)), constant_values=np.nan) for order in wave])
         flux_padded = np.array([np.pad(order, (0, max_length - len(order)), constant_values=np.nan) for order in flux])
         hdu_wave = fits.ImageHDU(wave_padded, name='WAVE')
