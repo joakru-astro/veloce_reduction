@@ -11,7 +11,10 @@ import pickle
 from . import veloce_reduction_tools
 from . import veloce_path
 
-def extract_run_no_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False, veloce_paths=None, output_path=None):
+### TODO: modify to make use of configuration files
+### for example it can include info about the run, arm, amp_mode, sim_calib and paths
+
+def extract_run_no_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False, remove_background=True, veloce_paths=None, output_path=None):
     """
     Extracts spectral data from Veloce observations without applying blaze correction.
 
@@ -87,6 +90,16 @@ def extract_run_no_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False,
                 # times.append(hdr['MJD-OBS'])
                 image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
                     image_data, hdr, overscan_range=32, amplifier_mode=amp_mode)
+                if remove_background:
+                    # this models scattered light and subtracts it
+                    background = veloce_reduction_tools.fit_background(image_subtracted_bias, traces)
+                    head = f'scattered light corrected\n---\nBackground statistics:\n---'
+                    median_str = f'median = {np.median(background)}'
+                    max_str = f'max = {np.max(background)}'
+                    std_str = f'stdev = {np.std(background)}'
+                    print('\n'.join([head, median_str, max_str, std_str]))
+                    image_subtracted_bias -= background
+                    image_subtracted_bias[image_subtracted_bias < 0] = 0
                 extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
                     image_subtracted_bias, traces, remove_background=False)
                 final_wave = veloce_reduction_tools.calibrate_orders_to_wave(
@@ -109,7 +122,7 @@ def extract_run_no_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False,
                 #     os.path.join(output_path, f"{target}_veloce_{arm}_{filename.split('.')[0]}"),
                 #     wave=final_wave, flux=final_flux, mjd=float(hdr['MJD-OBS']))
                 
-def extract_run_with_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False, blaze_path=None, veloce_paths=None, output_path=None):
+def extract_run_with_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=False, remove_background=True, blaze_path=None, veloce_paths=None, output_path=None):
     """
     Extracts spectral data from Veloce observations with blaze correction applied.
 
@@ -195,6 +208,16 @@ def extract_run_with_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=Fals
                 # times.append(hdr['MJD-OBS'])
                 image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
                     image_data, hdr, amplifier_mode=amp_mode, overscan_range=32)
+                if remove_background:
+                    # this models scattered light and subtracts it
+                    background = veloce_reduction_tools.fit_background(image_subtracted_bias, traces)
+                    head = f'scattered light corrected\n---\nBackground statistics:\n---'
+                    median_str = f'median = {np.median(background)}'
+                    max_str = f'max = {np.max(background)}'
+                    std_str = f'stdev = {np.std(background)}'
+                    print('\n'.join([head, median_str, max_str, std_str]))
+                    image_subtracted_bias -= background
+                    image_subtracted_bias[image_subtracted_bias < 0] = 0
                 extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
                     image_subtracted_bias, traces, remove_background=False)
                 waves = veloce_reduction_tools.calibrate_orders_to_wave(
@@ -232,7 +255,7 @@ def extract_run_with_blaze(obs_list_filename, run, arm, amp_mode, sim_calib=Fals
                 #     os.path.join(output_path, f"{target}_veloce_{arm}_{filename.split('.')[0]}"),
                 #     wave=final_wave, flux=final_flux, mjd=float(hdr['MJD-OBS']))
 
-def extract_blaze(file_name, arm, amp_mode, blaze_path=None, master_path=None, veloce_paths=None,):
+def extract_blaze(file_name, arm, amp_mode, remove_background=True, blaze_path=None, master_path=None, veloce_paths=None):
     """
     Extracts blaze function from a master flat field file for a specific spectrograph arm.
 
@@ -274,7 +297,16 @@ def extract_blaze(file_name, arm, amp_mode, blaze_path=None, master_path=None, v
         image_data = hdul[0].data
         hdr = hdul[0].header
         image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(image_data, hdr, amplifier_mode=amp_mode, overscan_range=32)
-        
+        if remove_background:
+                    # this models scattered light and subtracts it
+                    background = veloce_reduction_tools.fit_background(image_subtracted_bias, traces)
+                    head = f'scattered light corrected\n---\nBackground statistics:\n---'
+                    median_str = f'median = {np.median(background)}'
+                    max_str = f'max = {np.max(background)}'
+                    std_str = f'stdev = {np.std(background)}'
+                    print('\n'.join([head, median_str, max_str, std_str]))
+                    image_subtracted_bias -= background
+                    image_subtracted_bias[image_subtracted_bias < 0] = 0
         extracted_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(image_subtracted_bias, traces, summing_ranges, remove_background=False)
 
     np.savez(os.path.join(blaze_path, f"blaze_{file_name.split('.')[0]}"), blazes=np.array(extracted_orders))

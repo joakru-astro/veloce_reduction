@@ -3,7 +3,8 @@ import pickle
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import median_filter, label, find_objects
+from scipy.ndimage import median_filter, label, find_objects, zoom
+from scipy.interpolate import RBFInterpolator
 from csaps import csaps
 
 from . import veloce_path
@@ -333,6 +334,7 @@ class Traces:
             summing_ranges_upper=summing_ranges_upper,
             wave_calib_slice=wave_calib_slice
         )
+
 
 def remove_overscan_bias(frame, hdr, overscan_range=32, amplifier_mode=4):
     """
@@ -665,6 +667,54 @@ def get_orders_masks(binarized):
     
     orders = np.array(orders, dtype=np.uint16)
     return orders
+
+def fit_background(frame, traces, x_range=5, y_step=20, kernel='thin_plate_spline', smoothing=1, downsample_factor=0.1):
+    """
+    Fit the background of a given frame using radial basis function (RBF) interpolation.
+    
+    Parameters:
+    - frame (numpy.ndarray): The 2D array representing the image frame from which the background is to be extracted.
+    - traces (object): An object containing the trace information.
+    - x_range (int, optional): The range around each trace position to consider for fitting. Default is 5 pixels.
+    - y_step (int, optional): The step size for sampling the traces. Default is 20.
+    - kernel (str, optional): The kernel to use for the RBF interpolation. Default is 'thin_plate_spline'.
+    - smoothing (float, optional): The smoothing factor for the RBF interpolation. Default is 1.
+    - downsample_factor (float, optional): The factor by which to downsample the grid for interpolation. Default is 0.1.
+
+    Returns:
+    - numpy.ndarray: The 2D array representing the fitted background of the same shape as the input frame.
+    """
+    # # verify x_range
+    # for i in range(len(traces)-1):
+    #     if np.any((traces.x[i][::y_step]+traces.x[i+1][::y_step])/2+x_range>traces.x[i+1]-traces.summing_ranges_lower) or np.any((traces.x[i][::y_step]+traces.x[i+1][::y_step])/2-x_range>traces.x[i]+traces.summing_ranges_upper):
+    #        raise ValueError(f'x_range = {x_range} is too large for the given traces.')
+    # # verify y_step
+    # if frame.shape[0]/y_step < 100:
+    #     raise ValueError(f'y_step = {y_step} is too big for the frame resulting grid is too sparse.')
+    
+    # Extract the background values and coordinates
+    background_values = [[np.nanmedian(frame[int(y), int((x1+x2)/2-x_range):int((x1+x2)/2+x_range)]) for y, x1, x2 in zip(traces.y[i][::y_step], traces.x[i][::y_step], traces.x[i+1][::y_step])] for i in range(len(traces)-1)]
+    background_values = np.hstack(background_values)
+    background_points = [[(y, (x1+x2)/2) for y, x1, x2 in zip(traces.y[i][::y_step], traces.x[i][::y_step], traces.x[i+1][::y_step])] for i in range(len(traces)-1)]
+    background_points = np.vstack(background_points)
+
+    # Create the RBF interpolator
+    rbf = RBFInterpolator(background_points, background_values, kernel=kernel, smoothing=smoothing)
+
+    # Create a downsampled grid for the interpolation
+    grid_shape = frame.shape
+    downsampled_shape = (int(grid_shape[0] * downsample_factor), int(grid_shape[1] * downsample_factor))
+    grid_y, grid_x = np.mgrid[0:grid_shape[0]:downsampled_shape[0]*1j, 0:grid_shape[1]:downsampled_shape[1]*1j]
+    grid_points = np.vstack((grid_y.ravel(), grid_x.ravel())).T
+
+    # Interpolate on the downsampled grid
+    downsampled_background = rbf(grid_points).reshape(downsampled_shape)
+
+    # Upsample the interpolated background to the original grid shape
+    background = zoom(downsampled_background, (grid_shape[0] / downsampled_shape[0], grid_shape[1] / downsampled_shape[1]), order=1)
+    background[background < 0] = 0
+
+    return background    
 
 ### old version
 # def get_orders_masks(binarized):
