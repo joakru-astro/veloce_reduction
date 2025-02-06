@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pickle
 
-from . import veloce_path
+from . import veloce_config
 
 from datetime import datetime
 
@@ -19,11 +19,10 @@ def format_date(date_str):
     
     return formatted_date
 
-def load_run_logs(run, science_targets, arm, calib_type=None, veloce_paths=None):
+def load_run_logs(run, science_targets, arm, veloce_paths=None):
     if veloce_paths is None:
-        veloce_paths = veloce_path.VelocePaths(run)
+        veloce_paths = veloce_config.VelocePaths(run)
         veloce_paths.__post_init__()
-    veloce_paths.raw_dir
 
     # Define the regular expression pattern for YYMMDD format
     date_pattern = re.compile(r'^\d{6}$')
@@ -35,26 +34,44 @@ def load_run_logs(run, science_targets, arm, calib_type=None, veloce_paths=None)
     
     days = [format_date(date) for date in dates]
 
-    obs_list = {'science': {},
-            'flat_red': {},
-            'flat_green': {},
-            'flat_blue': {},
-            'flat_blue_long': {},
-            'dark': {},
-            'bias': {},
-            'wave_calib': {}}
+    obs_list = {'flat_red': {}, 'flat_green': {}, 'flat_blue': {}, 'flat_blue_long': {},
+                'ARC-ThAr': {}, 'SimThLong': {}, 'SimTh': {}, 'SimLC': {},
+                'dark': {}, 'bias': {}, 'science': {}}
     
     for day, date in zip(days, dates):
         log_path = os.path.join(veloce_paths.raw_parent_dir, run, date)
         log_name = [name for name in os.listdir(log_path) if name.split('.')[-1] == 'log'][0]
         log_path = os.path.join(log_path, log_name)
-        temp_obs_list = load_log_info(log_path, science_targets, arm, day, calib_type)
+        temp_obs_list = load_log_info(log_path, science_targets, arm, day)
         for key in temp_obs_list:
             obs_list[key][date] = temp_obs_list[key]
 
     return obs_list
 
-def load_log_info(log_path, science_targets, selected_arm, day, calib_type):
+def load_night_logs(run, date, science_targets, arm, veloce_paths=None):
+    if veloce_paths is None:
+        veloce_paths = veloce_config.VelocePaths(run)
+        veloce_paths.__post_init__()
+
+    # Define the regular expression pattern for YYMMDD format
+    date_pattern = re.compile(r'^\d{6}$')
+
+    day = format_date(date)
+
+    obs_list = {'flat_red': [], 'flat_green': [], 'flat_blue': [], 'flat_blue_long': [],
+                'ARC-ThAr': [], 'SimThLong': [], 'SimTh': [], 'SimLC': [],
+                'dark': [], 'bias': [], 'science': []}
+    
+    log_path = os.path.join(veloce_paths.raw_parent_dir, run, date)
+    log_name = [name for name in os.listdir(log_path) if name.split('.')[-1] == 'log'][0]
+    log_path = os.path.join(log_path, log_name)
+    temp_obs_list = load_log_info(log_path, science_targets, arm, day)
+    for key in temp_obs_list:
+        obs_list[key] += temp_obs_list[key]
+
+    return obs_list
+
+def load_log_info(log_path, science_targets, selected_arm, day):
     """
     Loads observation log information and categorizes files based on their type and selected arm.
 
@@ -79,9 +96,9 @@ def load_log_info(log_path, science_targets, selected_arm, day, calib_type):
       and 10.0s for 'flat_blue').
     """
     # obs_list = {'flat': [], 'dark': [], 'bias': [], 'science': [], 'wave_calib': []}
-    obs_list = {'flat_red': [], 'flat_green': [], 'flat_blue': [],
-                'flat_blue_long': [],  'dark': [], 'bias': [],
-                'science': [], 'wave_calib': []}
+    obs_list = {'flat_red': [], 'flat_green': [], 'flat_blue': [], 'flat_blue_long': [],
+                'ARC-ThAr': [], 'SimThLong': [], 'SimTh': [], 'SimLC': [],
+                'dark': [], 'bias': [], 'science': []}
     arms = {'red': 3, 'green': 2, 'blue': 1}
     with open(log_path, 'r') as f:
         lines = f.readlines()
@@ -104,8 +121,14 @@ def load_log_info(log_path, science_targets, selected_arm, day, calib_type):
                         else:
                             pass
                             # print(f"[Warning]: Non standard flat exp time = {exp_time} for {file_name}")
-                    elif target.strip() == calib_type:
-                        obs_list['wave_calib'].append(file_name)
+                    elif target.strip() == 'ARC-ThAr':
+                        obs_list['ARC-ThAr'].append(file_name)
+                    elif target.strip() == 'SimThLong':
+                        obs_list['SimThLong'].append(file_name)
+                    elif target.strip() == 'SimTh':
+                        obs_list['SimTh'].append(file_name)
+                    elif target.strip() == 'SimLC':
+                        obs_list['SimLC'].append(file_name)
                     elif target.strip() == 'DarkFrame':
                         obs_list['dark'].append(file_name)
                     elif target.strip() in science_targets or science_targets is None:
@@ -115,6 +138,8 @@ def load_log_info(log_path, science_targets, selected_arm, day, calib_type):
                     
     return obs_list
 
+### Probably saving info about all files (csience, calib ect.) from the logs is better then this cutout
+### TODO: change what is saved and how target list is passed to the function
 def save_science_target_list(summary, run=None, target=None, list_name=None, obs_list_path=None):
     """
     Saves a filtered list of science targets to a pickle file.
@@ -141,9 +166,8 @@ def save_science_target_list(summary, run=None, target=None, list_name=None, obs
     - The function uses the `pickle` module to save the filtered list to a file.
     """
     if obs_list_path is None:
-        veloce_paths = veloce_path.VelocePaths(run)
+        veloce_paths = veloce_config.VelocePaths(run)
         obs_list_path = veloce_paths.obs_list_dir
-    # obs_list_path = "/home/usqobserver2/Joachim_veloce/Veloce_reduction/Obs_lists"
     
     if target is not None:
         if list_name is None: list_name = target
@@ -157,6 +181,29 @@ def save_science_target_list(summary, run=None, target=None, list_name=None, obs
     with open(os.path.join(obs_list_path, f'obs_list_{list_name}.pkl'), 'wb') as f:
         pickle.dump(summary_final, f)
     
-    return f'obs_list_{list_name}.pkl'
+    return f'science_obs_list_{list_name}.pkl'
 
+
+def get_obs_list(summary, target=None):
+    """
+    Drops empty lists from the summary dictionary and optionally filters the observations based on the target name.
+
+
+    Parameters:
+    - summary (dict): A dictionary with observation dates as keys and lists of observations as values.
+    - target (str, optional): The target name to filter the observations. If provided, the list will be filtered
+      based on the target.
+
+    Returns:
+    - dict: A dictionary with non-empty lists of observations.
+    """
+    if target is not None:
+        summary_final = {k:[obs for obs in v if obs[0]==target] for k,v in summary.items() if v}
+    else:
+        summary_final = {k:v for k,v in summary.items() if v}
+
+    if not summary_final:
+        raise ValueError("No observations found for the specified target.")
+    
+    return summary_final
 # def load_multi_logs(science_targets, data_path, run, days, dates, logs_names):

@@ -6,8 +6,9 @@ import matplotlib.pyplot as plt
 from scipy.ndimage import median_filter, label, find_objects, zoom
 from scipy.interpolate import RBFInterpolator
 from csaps import csaps
+from astropy.io.fits import PrimaryHDU
 
-from . import veloce_path
+from . import veloce_config
 
 import numpy as np
 
@@ -152,7 +153,7 @@ class Traces:
         and is recommended.
         """
         if trace_dir is None:
-            veloce_paths = veloce_path.VelocePaths()
+            veloce_paths = veloce_config.VelocePaths()
             trace_dir = veloce_paths.trace_dir
         if filename:
             filename = f'{trace_dir}/{filename}.pkl'
@@ -397,7 +398,7 @@ def remove_overscan_bias(frame, hdr, overscan_range=32, amplifier_mode=4):
         # middle
         q3_overscan_mask[ydiv:,xdiv:xdiv+overscan_range] = 1
         q3_overscan_mask[ydiv:ydiv+overscan_range,xdiv:] = 1
-        # edge
+        # edgeusing remove_overscan_bias function
         q3_overscan_mask[ydiv:,xlen-overscan_range:] = 1
         q3_overscan_mask[ylen-overscan_range:,xdiv:] = 1
         q3 -= np.median(frame[q3_overscan_mask == 1])
@@ -1144,7 +1145,7 @@ def load_prefitted_wavecalib_trace(arm='red', calib_type='Th', trace_path=None, 
   """
 
   if trace_path is None:
-      veloce_paths = veloce_path.VelocePaths()
+      veloce_paths = veloce_config.VelocePaths()
       trace_path = veloce_paths.trace_dir
   if filename is not None:
       filename = os.path.join(trace_path, filename)
@@ -1212,7 +1213,7 @@ def load_prefitted_wave(arm='red', wave_calib_slice=slice(None), wave_path=None,
       matched wavelengths, etc.).
     """
     if wave_path is None:
-        veloce_paths = veloce_path.VelocePaths()
+        veloce_paths = veloce_config.VelocePaths()
         wave_path = veloce_paths.wave_dir
 
     if filename is not None:
