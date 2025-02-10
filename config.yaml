@@ -8,7 +8,7 @@ calib_type: Static # Wavelength calibration to use SimLC, SimThXe, Interpolate o
 # secondary information for the reduction
 arm: 'red' # Which arm to reduce 'all', 'red', 'green' or 'blue'
 amplifier_mode: 4 # 2 or 4
-sim_calib: True # Flag indicating if simultaneous ca True or False
+sim_calib: True # Flag indicating if simultaneous calibration was used True or False
 plot_diagnostic: True # True or False
 scattered_light: False # try to remove scattered light True or False
 flat_field: False # True or False

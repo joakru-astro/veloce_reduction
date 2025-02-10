@@ -8,8 +8,7 @@ from scipy.ndimage import median_filter
 # from astropy.stats import sigma_clip
 import pickle
 
-from . import veloce_reduction_tools
-from . import veloce_config
+from . import veloce_reduction_tools, veloce_config, veloce_wavecalib
 
 data_dirs = {'red': 'ccd_3', 'green': 'ccd_2', 'blue': 'ccd_1'}
 
@@ -25,7 +24,60 @@ data_dirs = {'red': 'ccd_3', 'green': 'ccd_2', 'blue': 'ccd_1'}
 #     def save(self, filename):
 #         np.savez(filename, wave=self.wave, flux=self.flux, hdr=self.header)
 
-def extract_run_no_blaze(obs_list, run, arm, amp_mode, sim_calib=False, remove_background=True, veloce_paths=None, output_path=None):
+def load_trace_data(arm, trace_path, sim_calib=False):
+    if sim_calib:
+        filename = os.path.join(trace_path, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
+    else:
+        filename = os.path.join(trace_path.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
+    traces = veloce_reduction_tools.Traces.load_traces(filename)
+    return traces
+
+def remove_scattered_light(frame, hdr, traces):
+    """
+    Remove scattered light from the image.
+    """
+    # this models scattered light and subtracts it
+    background = veloce_reduction_tools.fit_background(frame, traces)
+    head = f'scattered light corrected\n---\nBackground statistics:\n---'
+    median_str = f'median = {np.median(background)}'
+    max_str = f'max = {np.max(background)}'
+    std_str = f'stdev = {np.std(background)}'
+    print('\n'.join([head, median_str, max_str, std_str]))
+    frame -= background
+    frame[frame < 0] = 0
+    hdr['HISTORY'] = 'Scattered light corrected'
+    ### TODO: add diagnoscit plot and save it, add note to reduction log
+
+    return frame
+
+def get_flat(config, veloce_paths, date, obs_list):
+    norm_flat_filename = os.path.join(veloce_paths.master_dir, f'master_flat_{config['arm']}_{date}_norm.fits')
+    if os.path.exists(norm_flat_filename):
+        with fits.open(norm_flat_filename) as hdul:
+            flat = hdul[0].data
+            hdr = hdul[0].header
+    else:
+        master_flat_filename = os.path.join(veloce_paths.master_dir, f'master_flat_{config['arm']}_{date}.fits')
+        if os.path.exists(master_flat_filename):
+            with fits.open(master_flat_filename) as hdul:
+                master_flat = hdul[0].data
+                hdr = hdul[0].header
+            ### TODO: swicht all flats to have removed overscan?
+            master_flat = veloce_reduction_tools.remove_overscan_bias(
+                master_flat, hdr, overscan_range=32, amplifier_mode=config['amplifier_mode'])
+        else:
+            master_flat, hdr = veloce_reduction_tools.get_master_mmap(
+                obs_list, f"flat_{config['arm']}", veloce_paths.raw_parent_dir,
+                config['run'], date, config['arm'])
+            veloce_reduction_tools.save_image_fits(master_flat_filename, master_flat, hdr)
+            master_flat = veloce_reduction_tools.remove_overscan_bias(
+                master_flat, hdr, overscan_range=32, amplifier_mode=config['amplifier_mode'])
+        flat, hdr = veloce_reduction_tools.get_normalised_master_flat(master_flat, hdr)
+        veloce_reduction_tools.save_image_fits(norm_flat_filename, flat, hdr)
+    return flat
+
+# def extract_run(obs_list, run, arm, amp_mode, sim_calib=False, remove_background=True, veloce_paths=None, output_path=None):
+def extract_run(target_list, config, veloce_paths, obs_list, output_path=None):
     """
     Extracts spectral data from Veloce observations without applying blaze correction.
 
@@ -58,84 +110,88 @@ def extract_run_no_blaze(obs_list, run, arm, amp_mode, sim_calib=False, remove_b
     saved to files (used in further processing).
     """
     if veloce_paths is None:
-        veloce_paths = veloce_config.VelocePaths(run)
+        veloce_paths = veloce_config.VelocePaths(config['run'])
     if output_path is None:
         output_path = veloce_paths.extracted_dir
         if not os.path.exists(output_path):
             os.makedirs(output_path)
 
     # pick which arm to reduce 
-    if arm in data_dirs.keys():
-        ccd = data_dirs[arm]
-    elif arm == 'all':
+    if config['arm'] in data_dirs.keys():
+        ccd = data_dirs[config['arm']]
+    elif config['arm'] == 'all':
         pass
         #TODO: implement for all arms
     else:
         raise ValueError('Unsupported arm')
     
-    # load traces
-    if sim_calib:
-        # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
-        filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
-        traces = veloce_reduction_tools.Traces.load_traces(filename)
-    else:
-        # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
-        filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
-        traces = veloce_reduction_tools.Traces.load_traces(filename)
-    # traces, summing_ranges, wave_calib_slice = \
-    #     trace_data['traces'], trace_data['summing_ranges'], trace_data['wave_calib_slice']
-    # load wave calibration based on ThAr
-    ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
-        veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_calib_slice=traces.wave_calib_slice,
-                                                   wave_path=veloce_paths.wave_dir)
+    ### load traces
+    traces = load_trace_data(config['arm'], veloce_paths.trace_dir, sim_calib=config['sim_calib'])
+    # if sim_calib:
+    #     # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
+    #     filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
+    #     traces = veloce_reduction_tools.Traces.load_traces(filename)
+    # else:
+    #     # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
+    #     filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
+    #     traces = veloce_reduction_tools.Traces.load_traces(filename)
 
-    # with open(os.path.join(os.path.join(veloce_paths.obs_list_dir, obs_list_filename)), 'rb') as f:
-    #     obs_list = pickle.load(f)
-    
-    for date in obs_list.keys(): 
-        for obs in obs_list[date]:
+    ### load wave calibration based on ThAr
+    ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
+        veloce_reduction_tools.load_prefitted_wave(arm=config['arm'], wave_calib_slice=traces.wave_calib_slice,
+                                                   wave_path=veloce_paths.wave_dir)
+    if config['calib_type'] == 'Static':
+        static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
+    elif config['calib_type'] == 'Interpolate':
+        wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation()
+    else:
+        pass
+
+    for date in target_list.keys(): 
+        if config['flat_field']:
+            flat = get_flat(config, veloce_paths, date, obs_list)
+            
+        for obs in target_list[date]:
             target, filename = obs
             print(target, filename)
-            spectrum_filename =  os.path.join(veloce_paths.raw_parent_dir, run, date, ccd, filename)
+            spectrum_filename =  os.path.join(veloce_paths.raw_parent_dir, config['run'], date, ccd, filename)
             with fits.open(spectrum_filename) as hdul:
                 image_data = hdul[0].data
                 hdr = hdul[0].header
-                # times.append(hdr['MJD-OBS'])
+
                 image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
-                    image_data, hdr, overscan_range=32, amplifier_mode=amp_mode)
-                if remove_background:
-                    # this models scattered light and subtracts it
-                    background = veloce_reduction_tools.fit_background(image_subtracted_bias, traces)
-                    head = f'scattered light corrected\n---\nBackground statistics:\n---'
-                    median_str = f'median = {np.median(background)}'
-                    max_str = f'max = {np.max(background)}'
-                    std_str = f'stdev = {np.std(background)}'
-                    print('\n'.join([head, median_str, max_str, std_str]))
-                    image_subtracted_bias -= background
-                    image_subtracted_bias[image_subtracted_bias < 0] = 0
+                    image_data, hdr, overscan_range=32, amplifier_mode=config['amplifier_mode'])
+                
+                if config['flat_field']:
+                    image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, flat, hdr)
+                
+                if config['scattered_light']:
+                    image_subtracted_bias, hdr = remove_scattered_light(image_subtracted_bias, hdr, traces)
+                
                 extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
                     image_subtracted_bias, traces, remove_background=False)
-                final_wave = veloce_reduction_tools.calibrate_orders_to_wave(
-                    extracted_science_orders, Y0, COEFFS, traces=traces)
+                
+                if config['calib_type'] == 'Static':
+                    final_wave = static_wave
+                elif config['calib_type'] == 'Interpolate':
+                    final_wave = veloce_wavecalib.interpolate_wave(
+                        extracted_science_orders, hdr)
+                elif config['calib_type'] == 'SimThXe':
+                    final_wave = veloce_wavecalib.calibrate_simTh(
+                        extracted_science_orders, hdr)
+                elif config['calib_type'] == 'SimLC':
+                    final_wave = veloce_wavecalib.calibrate_simLC(
+                        extracted_science_orders, hdr)
+                                
                 final_flux = extracted_science_orders
-                # if arm == 'green':
-                #     final_wave = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
-                #         extracted_science_orders, Y0[0], COEFFS))
-                #     final_flux = np.array(extracted_science_orders[1:])
-                # else:
-                #     final_wave = np.array(veloce_reduction_tools.calibrate_orders_to_wave(
-                #         extracted_science_orders, Y0[0], COEFFS))
-                #     final_flux = np.array(extracted_science_orders)
 
                 # save extracted spectrum as fits file
-                fits_filename = os.path.join(output_path, f"{target}_veloce_{arm}_{filename}")
+                fits_filename = os.path.join(output_path, f"{target}_veloce_{config['arm']}_{filename}")
                 veloce_reduction_tools.save_extracted_spectrum_fits(
                     filename=fits_filename, output_path=output_path, wave=final_wave, flux=final_flux, hdr=hdr)
-                # np.savez(
-                #     os.path.join(output_path, f"{target}_veloce_{arm}_{filename.split('.')[0]}"),
-                #     wave=final_wave, flux=final_flux, mjd=float(hdr['MJD-OBS']))
 
-def extract_night_no_blaze(obs_list, run, date, arm, amp_mode, sim_calib=False, remove_background=True, veloce_paths=None, output_path=None):
+# def extract_night(obs_list, run, date, arm, amp_mode, sim_calib=False, remove_background=True, veloce_paths=None, output_path=None):
+def extract_night(target_list, config, veloce_paths, obs_list, output_path=None):
     """
     Extracts spectral data from Veloce observations for a specific night.
 
@@ -166,112 +222,141 @@ def extract_night_no_blaze(obs_list, run, date, arm, amp_mode, sim_calib=False, 
     None. The function is designed to perform data extraction and processing, with outputs
     saved to files (used in further processing).
     """
-    if arm in data_dirs.keys():
-        ccd = data_dirs[arm]
-    elif arm == 'all':
+    if config['arm'] in data_dirs.keys():
+        ccd = data_dirs[config['arm']]
+    elif config['arm'] == 'all':
         pass
         #TODO: implement for all arms
     else:
         raise ValueError('Unsupported arm')
     
-    # load traces
-    if sim_calib:
-        # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
-        filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
-        traces = veloce_reduction_tools.Traces.load_traces(filename)
-    else:
-        # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
-        filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
-        traces = veloce_reduction_tools.Traces.load_traces(filename)
+    ### load traces
+    traces = load_trace_data(config['arm'], veloce_paths.trace_dir, sim_calib=config['sim_calib'])
+    # if sim_calib:
+    #     # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
+    #     filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
+    #     traces = veloce_reduction_tools.Traces.load_traces(filename)
+    # else:
+    #     # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
+    #     filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
+    #     traces = veloce_reduction_tools.Traces.load_traces(filename)
 
     # load wave calibration based on ThAr
     ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
-        veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_calib_slice=traces.wave_calib_slice,
+        veloce_reduction_tools.load_prefitted_wave(arm=config['arm'], wave_calib_slice=traces.wave_calib_slice,
                                                     wave_path=veloce_paths.wave_dir)
+    if config['calib_type'] == 'Static':
+        static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
+    elif config['calib_type'] == 'Interpolate':
+        wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation()
+    else:
+        pass
     
     # with open(os.path.join(os.path.join(veloce_paths.obs_list_dir, obs_list_filename)), 'rb') as f:
     #     obs_list = pickle.load(f)
-    
-    for target, filename in obs_list[date]:
+    date = config['date']
+    if config['flat_field']:
+        flat = get_flat(config, veloce_paths, date, obs_list)
+
+    for target, filename in target_list[date]:
         print(target, filename)
-        spectrum_filename =  os.path.join(veloce_paths.raw_parent_dir, run, date, ccd, filename)
+        spectrum_filename =  os.path.join(veloce_paths.raw_parent_dir, config['run'], date, ccd, filename)
         with fits.open(spectrum_filename) as hdul:
             image_data = hdul[0].data
             hdr = hdul[0].header
             # times.append(hdr['MJD-OBS'])
             image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
-                image_data, hdr, overscan_range=32, amplifier_mode=amp_mode)
-            if remove_background:
-                # this models scattered light and subtracts it
-                background = veloce_reduction_tools.fit_background(image_subtracted_bias, traces)
-                head = f'scattered light corrected\n---\nBackground statistics:\n---'
-                median_str = f'median = {np.median(background)}'
-                max_str = f'max = {np.max(background)}'
-                std_str = f'stdev = {np.std(background)}'
-                print('\n'.join([head, median_str, max_str, std_str]))
-                image_subtracted_bias -= background
-                image_subtracted_bias[image_subtracted_bias < 0] = 0
+                image_data, hdr, overscan_range=32, amplifier_mode=config['amplifier_mode'])
+            
+            if config['flat_field']:
+                image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, flat, hdr)
+
+            if config['scattered_light']:
+                image_subtracted_bias, hdr = remove_scattered_light(image_subtracted_bias, hdr, traces)
+
             extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
                 image_subtracted_bias, traces, remove_background=False)
-            final_wave = veloce_reduction_tools.calibrate_orders_to_wave(
-                extracted_science_orders, Y0, COEFFS, traces=traces)
+            
+            if config['calib_type'] == 'Static':
+                final_wave = static_wave
+            elif config['calib_type'] == 'Interpolate':
+                final_wave = veloce_wavecalib.interpolate_wave(extracted_science_orders, hdr)
+            elif config['calib_type'] == 'SimThXe':
+                final_wave = veloce_wavecalib.calibrate_simTh(extracted_science_orders, hdr)
+            elif config['calib_type'] == 'SimLC':
+                final_wave = veloce_wavecalib.calibrate_simLC(extracted_science_orders, hdr)
+            
             final_flux = extracted_science_orders
 
             # save extracted spectrum as fits file
-            fits_filename = os.path.join(output_path, f"{target}_veloce_{arm}_{filename}")
+            fits_filename = os.path.join(output_path, f"{target}_veloce_{config['arm']}_{filename}")
             veloce_reduction_tools.save_extracted_spectrum_fits(
                 filename=fits_filename, output_path=output_path, wave=final_wave, flux=final_flux, hdr=hdr)
 
-def extract_single_file(filename, run, date, arm, amp_mode, sim_calib=False, remove_background=True, veloce_paths=None, output_path=None):
-    if arm in data_dirs.keys():
-        ccd = data_dirs[arm]
-    elif arm == 'all':
+# def extract_single_file(filename, run, date, arm, amp_mode, sim_calib=False, remove_background=True, veloce_paths=None, output_path=None):
+def extract_single_file(filename, config, veloce_paths, obs_list, output_path=None):
+    if config['arm'] in data_dirs.keys():
+        ccd = data_dirs[config['arm']]
+    elif config['arm'] == 'all':
         pass
         #TODO: implement for all arms
     else:
         raise ValueError('Unsupported arm')
     
-    # load traces
-    if sim_calib:
-        # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
-        filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
-        traces = veloce_reduction_tools.Traces.load_traces(filename)
-    else:
-        # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
-        filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
-        traces = veloce_reduction_tools.Traces.load_traces(filename)
+    ### load traces
+    traces = load_trace_data(config['arm'], veloce_paths.trace_dir, sim_calib=config['sim_calib'])
+    # if sim_calib:
+    #     # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
+    #     filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
+    #     traces = veloce_reduction_tools.Traces.load_traces(filename)
+    # else:
+    #     # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
+    #     filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
+    #     traces = veloce_reduction_tools.Traces.load_traces(filename)
 
     # load wave calibration based on ThAr
     ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
-        veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_calib_slice=traces.wave_calib_slice,
+        veloce_reduction_tools.load_prefitted_wave(arm=config['arm'], wave_calib_slice=traces.wave_calib_slice,
                                                     wave_path=veloce_paths.wave_dir)
-    
+    if config['calib_type'] == 'Static':
+        static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
+    elif config['calib_type'] == 'Interpolate':
+        wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation()
+    else:
+        pass
+
     print(filename)
-    spectrum_filename =  os.path.join(veloce_paths.raw_parent_dir, run, date, ccd, filename)
+    spectrum_filename =  os.path.join(veloce_paths.raw_parent_dir, config['run'], config['date'], ccd, filename)
     with fits.open(spectrum_filename) as hdul:
         image_data = hdul[0].data
         hdr = hdul[0].header
         # times.append(hdr['MJD-OBS'])
         image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
-            image_data, hdr, overscan_range=32, amplifier_mode=amp_mode)
-        if remove_background:
-            # this models scattered light and subtracts it
-            background = veloce_reduction_tools.fit_background(image_subtracted_bias, traces)
-            head = f'scattered light corrected\n---\nBackground statistics:\n---'
-            median_str = f'median = {np.median(background)}'
-            max_str = f'max = {np.max(background)}'
-            std_str = f'stdev = {np.std(background)}'
-            print('\n'.join([head, median_str, max_str, std_str]))
-            image_subtracted_bias -= background
-            image_subtracted_bias[image_subtracted_bias < 0] = 0
+            image_data, hdr, overscan_range=32, amplifier_mode=config['amplifier_mode'])
+        
+        if config['flat_field']:
+            flat = get_flat(config, veloce_paths, config['date'], obs_list)
+            image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, flat, hdr)
+        
+        if config['scattered_light']:
+            image_subtracted_bias, hdr = remove_scattered_light(image_subtracted_bias, hdr, traces)
+        
         extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
             image_subtracted_bias, traces, remove_background=False)
-        final_wave = veloce_reduction_tools.calibrate_orders_to_wave(
-            extracted_science_orders, Y0, COEFFS, traces=traces)
+        
+        if config['calib_type'] == 'Static':
+            final_wave = static_wave
+        elif config['calib_type'] == 'Interpolate':
+            final_wave = veloce_wavecalib.interpolate_wave(extracted_science_orders, hdr)
+        elif config['calib_type'] == 'SimThXe':
+            final_wave = veloce_wavecalib.calibrate_simTh(extracted_science_orders, hdr)
+        elif config['calib_type'] == 'SimLC':
+            final_wave = veloce_wavecalib.calibrate_simLC(extracted_science_orders, hdr)
+        
         final_flux = extracted_science_orders
 
         # save extracted spectrum as fits file
-        fits_filename = os.path.join(output_path, f"veloce_{arm}_{filename}")
+        fits_filename = os.path.join(output_path, f"veloce_{config['arm']}_{filename}")
         veloce_reduction_tools.save_extracted_spectrum_fits(
             filename=fits_filename, output_path=output_path, wave=final_wave, flux=final_flux, hdr=hdr)
 
