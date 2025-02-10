@@ -336,7 +336,7 @@ class Traces:
             wave_calib_slice=wave_calib_slice
         )
 
-
+### Image processing functions
 def remove_overscan_bias(frame, hdr, overscan_range=32, amplifier_mode=4):
     """
     Removes the overscan bias from an image frame by subtracting the median of the overscan regions.
@@ -1375,7 +1375,66 @@ def get_master_mmap(obs_list, master_type, data_path, run, date, arm):
 
     return master_frame, header
 
-def save_image_fits(filename, output_path, image, hdr):
+# def make_normalised_master_flat(master_filename, master_path, amplifier_mode):
+def get_normalised_master_flat(flat, hdr):
+    """
+    Create a normalized master flat field image.
+    This function takes a flat field image and its header, smooths the flat field
+    image using cubic smoothing splines, and then normalizes the flat field image
+    by dividing it by the smoothed version. Any non-positive values in the normalized
+    flat field image are set to 1.
+
+    Parameters:
+    - flat (numpy.ndarray): The input flat field image.
+    - hdr (astropy.io.fits.Header): The FITS header associated with the flat field image.
+    
+    Returns:
+    - tuple: A tuple containing the normalized flat field image (numpy.ndarray) and the
+           modified FITS header (astropy.io.fits.Header).
+    """
+    # with fits.open(os.path.join(master_path, master_filename)) as hdul:
+    #     flat_image = hdul[0].data
+    #     hdr = hdul[0].header
+    # flat_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(flat_image, hdr, overscan_range=32, amplifier_mode=amplifier_mode)
+
+    y = np.arange(flat.shape[0])
+    smoothed_flat = np.array([csaps(y, flat[:, col], y, smooth=0.5) for col in range(flat.shape[1])]).T    
+        
+    normalised_flat = flat / (smoothed_flat)
+    if np.any(normalised_flat <= 0):
+        print(np.min(normalised_flat), np.sum(normalised_flat <= 0))
+        normalised_flat[normalised_flat <= 0] = 1
+
+    # normalised_flat_name = master_filename.split('.')[0]+'_norm.fits'
+    # veloce_reduction_tools.save_image_fits(normalised_flat_name, master_path, normalised_flat, hdr)
+    
+    ### TODO: modify header to reflect that it is a normalised flat
+    
+    return normalised_flat, hdr
+
+def flat_field_correction(frame, flat, hdr):
+    """
+    Corrects an astronomical image for flat-fielding using a normalised flat-field frame.
+
+    This function performs flat-field correction on an astronomical image using a normalised flat-field frame.
+    The function divides the image by the flat-field frame to remove pixel-to-pixel variations in the detector
+    response and create a flat-field corrected image.
+
+    Parameters:
+    - frame (numpy.ndarray): A 2D numpy array representing the astronomical image to correct.
+    - flat (numpy.ndarray): A 2D numpy array representing the normalised flat-field frame.
+    - hdr (astropy.io.fits.header.Header): An Astropy header object containing metadata information for the image.
+
+    Returns:
+    - tuple: A tuple containing 2D numpy array representing the flat-field corrected image and modified header.
+    """
+    if frame.shape != flat.shape:
+        raise ValueError("Frame and flat field image must have the same shape.")
+    flat_corrected_image = frame / flat
+    hdr['HISTORY'] = 'Flat-field corrected'
+    return flat_corrected_image, hdr
+
+def save_image_fits(filename, image, hdr):
     """
     Saves a 2D image array to a FITS file with a specified header.
 
@@ -1386,7 +1445,6 @@ def save_image_fits(filename, output_path, image, hdr):
 
     Parameters:
     - filename (str): The name of the FITS file to save the image to.
-    - output_path (str): The path to the directory where the FITS file will be saved.
     - image (numpy.ndarray): A 2D numpy array representing the image data to save.
     - hdr (astropy.io.fits.header.Header): An Astropy header object containing metadata information for the image.
 
@@ -1399,9 +1457,8 @@ def save_image_fits(filename, output_path, image, hdr):
     """
     hdu = fits.PrimaryHDU(image, header=hdr)
     hdul = fits.HDUList([hdu])
-    output_filename = os.path.join(output_path, filename)
-    hdul.writeto(output_filename, overwrite=True)
-    return output_filename 
+    hdul.writeto(filename, overwrite=True)
+    return filename 
 
 def save_extracted_spectrum_fits(filename, output_path, wave, flux, hdr):
     """
