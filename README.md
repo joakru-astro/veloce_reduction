@@ -2,6 +2,9 @@
 
 Python code for simple reduction of data from Veloce @ AAT.
 
+### Statement of purpose
+[Veloce](https://aat.anu.edu.au/science/instruments/current/veloce/overview) is a high-resolution ($\lambda / \Delta \lambda = 80'000) échelle spectrograph, covering the wavelength range from 396nm to 940nm in a single exposure. The red arm was commissioned in 2018 [(Gilbert et al. 2018)](https://ui.adsabs.harvard.edu/abs/2018SPIE10702E..0YG/abstract), with green and blue joining in 2023 [(Taylor et al. 2024)](https://ui.adsabs.harvard.edu/abs/2024SPIE13096E..45T/abstract). However, despite the community being granted access to the instrument and being open to observing proposals, there was no official public pipeline for data reduction. Having the opportunity to observe with Veloce@AAT and spend hours working with the data, I decided to share my code to process the observations.
+
 ### Workflow
 The reduction workflow consists of follwoing steps:
 
@@ -36,8 +39,14 @@ Conda environment can be recreated using:
 ```
 conda env create -f environment.yml
 ```
-I aim to clean this environment and make a full instalation instruction. And probably rename the environment.
+I aim to clean this environment and make a full instalation instruction.
+
+### Limitations
+In its current form, my pipeline doesn't use optimal extraction and just co-adds the flux from all the fibres; thus, it is probably not suited for precise RV science.
 
 ### Data
 Place your data in the /Data/Raw/ or specify your own path in veloce_path.py.
 [Sample data from CSV run](https://www.dropbox.com/scl/fo/qleydw5tsvpkpfl1jx985/AJmCFf8FNwuO7GEVXNzZSDQ?rlkey=xy9j0vfnb0wo6xzcf27n6wgpu&st=4gq4srkk&dl=0)
+
+### Acknowledgement
+For the static wavelength solution, I use precomputed coefficients for polynomials available in the Veloce Instrument Manual. I want to thank Chris Tinney for these solutions and all the valuable information provided and extend my gratitude to anyone who contributed to this resource.
