@@ -1,14 +1,14 @@
 # primary information for the reduction
 reduce: run # what to reduce options: 'run', 'night', or 'file'
-run: CSV_Run # name of the run (directory name including observing nights - standard Veloce directory structre)
-date: 230826 # date of the observation (YYMMDD), if reduce is 'night' or 'file'
-filename: 26aug20146.fits # name of the file to reduce, if reduce is 'file'
-science_targets: targets.dat # file containg list of science targets
+run: CSV_Run # name of the run (directory name including observing nights - standard Veloce directory structure)
+date: 230826 # date of the observation (YYMMDD), if 'reduce' is 'night' or 'file'
+filename: 26aug20146.fits # name of the file to reduce, if 'reduce' is 'file'
+science_targets: targets.dat # file containing a list of science targets
 calib_type: Static # Wavelength calibration to use SimLC, SimThXe, Interpolate or Static
 # secondary information for the reduction
 arm: 'red' # Which arm to reduce 'all', 'red', 'green' or 'blue'
 amplifier_mode: 4 # 2 or 4
-sim_calib: True # Flag indicating if simultaneous calibration was used True or False
+sim_calib: True # Flag indicating if the simultaneous calibration was used True or False
 plot_diagnostic: True # True or False
 scattered_light: False # try to remove scattered light True or False
 flat_field: False # True or False
@@ -18,15 +18,15 @@ flat_field: False # True or False
 raw_parent_dir: Data/Raw/ # path to the directory with raw data (one in which the run directory is, i.e. input directory)
 # extracted_parent_dir: /Path/to/Veloce/Data/Extracted # path to the directory where extracted data will be stored (i.e. output directory)
 extracted_parent_dir: Data/Extracted/ # path to the directory where extracted data will be stored (i.e. output directory)
-# below are paths where code will stor intermediet files and diagnostics
-# by default they are set as subdirectories of output directory with extracted data
+# below are paths where code will store intermediate files and diagnostics
+# by default, they are set as subdirectories of the output directory with extracted data
 blaze_dir: Default
 master_dir: Default
 wavelength_calibration_dir: Default
 obs_list_dir: Default
 plot_dir: Default
 log_dir: Default
-# below are paths where code will look for internal files
+# below are paths where the code will look for internal files
 # leave as default unless you know what you are doing
 # veloce_reduction_dir: Default
 trace_dir: Default # path to the directory with traces to be extracted
