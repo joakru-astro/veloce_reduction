@@ -19,18 +19,18 @@ def format_date(date_str):
     
     return formatted_date
 
-def load_run_logs(run, science_targets, arm, veloce_paths=None):
-    if veloce_paths is None:
-        veloce_paths = veloce_config.VelocePaths(run)
-        veloce_paths.__post_init__()
+def load_run_logs(run, science_targets, arm, veloce_paths):
+    # if veloce_paths is None:
+    #     veloce_paths = veloce_config.VelocePaths(run)
+    #     veloce_paths.__post_init__()
 
     # Define the regular expression pattern for YYMMDD format
     date_pattern = re.compile(r'^\d{6}$')
 
     # Use list comprehension to filter and sort directories
     dates = sorted(
-        [item for item in os.listdir(veloce_paths.raw_dir)
-         if os.path.isdir(os.path.join(veloce_paths.raw_dir, item)) and date_pattern.match(item)])
+        [item for item in os.listdir(veloce_paths.input_dir)
+         if os.path.isdir(os.path.join(veloce_paths.input_dir, item)) and date_pattern.match(item)])
     
     days = [format_date(date) for date in dates]
 
@@ -39,7 +39,7 @@ def load_run_logs(run, science_targets, arm, veloce_paths=None):
                 'dark': {}, 'bias': {}, 'science': {}}
     
     for day, date in zip(days, dates):
-        log_path = os.path.join(veloce_paths.raw_parent_dir, run, date)
+        log_path = os.path.join(veloce_paths.input_dir, date)
         log_name = [name for name in os.listdir(log_path) if name.split('.')[-1] == 'log'][0]
         log_path = os.path.join(log_path, log_name)
         temp_obs_list = load_log_info(log_path, science_targets, arm, day)
@@ -48,10 +48,10 @@ def load_run_logs(run, science_targets, arm, veloce_paths=None):
 
     return obs_list
 
-def load_night_logs(run, date, science_targets, arm, veloce_paths=None):
-    if veloce_paths is None:
-        veloce_paths = veloce_config.VelocePaths(run)
-        veloce_paths.__post_init__()
+def load_night_logs(run, date, science_targets, arm, veloce_paths):
+    # if veloce_paths is None:
+    #     veloce_paths = veloce_config.VelocePaths(run)
+    #     veloce_paths.__post_init__()
 
     # Define the regular expression pattern for YYMMDD format
     date_pattern = re.compile(r'^\d{6}$')
@@ -62,7 +62,7 @@ def load_night_logs(run, date, science_targets, arm, veloce_paths=None):
                 'ARC-ThAr': [], 'SimThLong': [], 'SimTh': [], 'SimLC': [],
                 'dark': [], 'bias': [], 'science': []}
     
-    log_path = os.path.join(veloce_paths.raw_parent_dir, run, date)
+    log_path = os.path.join(veloce_paths.input_dir, date)
     log_name = [name for name in os.listdir(log_path) if name.split('.')[-1] == 'log'][0]
     log_path = os.path.join(log_path, log_name)
     temp_obs_list = load_log_info(log_path, science_targets, arm, day)

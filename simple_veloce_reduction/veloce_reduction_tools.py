@@ -1460,7 +1460,7 @@ def save_image_fits(filename, image, hdr):
     hdul.writeto(filename, overwrite=True)
     return filename 
 
-def save_extracted_spectrum_fits(filename, output_path, wave, flux, hdr):
+def save_extracted_spectrum_fits(filename, wave, flux, hdr):
     """
     Saves a 2D spectrum array to a FITS file with a specified header.
 
@@ -1502,9 +1502,9 @@ def save_extracted_spectrum_fits(filename, output_path, wave, flux, hdr):
     # hdr['CTYPE2'] = 'Flux'
     # hdr['CUNIT1'] = 'Nm'
     hdul[0].header = hdr
-    output_filename = os.path.join(output_path, filename)
-    hdul.writeto(output_filename, overwrite=True)
-    return output_filename
+    
+    hdul.writeto(filename, overwrite=True)
+    return filename
 
 def load_extracted_spectrum_fits(filename):
     """
