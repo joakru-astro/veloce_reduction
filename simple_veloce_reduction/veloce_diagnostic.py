@@ -3,7 +3,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from . import veloce_reduction_tools, veloce_config
+from . import veloce_reduction_tools
 
 def plot_order_cross_section(frame, traces, order, filename, veloce_paths, plot_type='median', margin=[10,10]):
     """
