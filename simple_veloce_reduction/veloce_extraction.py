@@ -277,6 +277,7 @@ def extract_night(target_list, config, veloce_paths, obs_list):
             flat = get_flat(config, veloce_paths, date, obs_list)
 
         for target, filename in target_list[date]:
+        # for target, filename in target_list:
             print(target, filename)
             spectrum_filename =  os.path.join(veloce_paths.input_dir, date, ccd, filename)
             # spectrum_filename =  os.path.join(veloce_paths.input_dir, config['run'], date, ccd, filename)

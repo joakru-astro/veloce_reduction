@@ -19,7 +19,7 @@ def format_date(date_str):
     
     return formatted_date
 
-def load_run_logs(run, science_targets, arm, veloce_paths):
+def load_run_logs(science_targets, arm, veloce_paths):
     # if veloce_paths is None:
     #     veloce_paths = veloce_config.VelocePaths(run)
     #     veloce_paths.__post_init__()
@@ -48,7 +48,7 @@ def load_run_logs(run, science_targets, arm, veloce_paths):
 
     return obs_list
 
-def load_night_logs(run, date, science_targets, arm, veloce_paths):
+def load_night_logs(date, science_targets, arm, veloce_paths):
     # if veloce_paths is None:
     #     veloce_paths = veloce_config.VelocePaths(run)
     #     veloce_paths.__post_init__()
@@ -58,16 +58,19 @@ def load_night_logs(run, date, science_targets, arm, veloce_paths):
 
     day = format_date(date)
 
-    obs_list = {'flat_red': [], 'flat_green': [], 'flat_blue': [], 'flat_blue_long': [],
-                'ARC-ThAr': [], 'SimThLong': [], 'SimTh': [], 'SimLC': [],
-                'dark': [], 'bias': [], 'science': []}
+    # obs_list = {'flat_red': [], 'flat_green': [], 'flat_blue': [], 'flat_blue_long': [],
+    #             'ARC-ThAr': [], 'SimThLong': [], 'SimTh': [], 'SimLC': [],
+    #             'dark': [], 'bias': [], 'science': []}
+    obs_list = {'flat_red': {}, 'flat_green': {}, 'flat_blue': {}, 'flat_blue_long': {},
+                'ARC-ThAr': {}, 'SimThLong': {}, 'SimTh': {}, 'SimLC': {},
+                'dark': {}, 'bias': {}, 'science': {}}
     
     log_path = os.path.join(veloce_paths.input_dir, date)
     log_name = [name for name in os.listdir(log_path) if name.split('.')[-1] == 'log'][0]
     log_path = os.path.join(log_path, log_name)
     temp_obs_list = load_log_info(log_path, science_targets, arm, day)
     for key in temp_obs_list:
-        obs_list[key] += temp_obs_list[key]
+        obs_list[key][date] = temp_obs_list[key]
 
     return obs_list
 
@@ -187,7 +190,6 @@ def save_science_target_list(summary, run=None, target=None, list_name=None, obs
 def get_obs_list(summary, target=None):
     """
     Drops empty lists from the summary dictionary and optionally filters the observations based on the target name.
-
 
     Parameters:
     - summary (dict): A dictionary with observation dates as keys and lists of observations as values.
