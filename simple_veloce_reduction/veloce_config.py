@@ -194,6 +194,8 @@ def validate_config(config):
         raise FileNotFoundError(f'{os.path.abspath(config["wave_dir"])} does not exist.')
     if config['trace_dir'] != 'Default' and not os.path.exists(os.path.abspath(config['trace_dir'])):
         raise FileNotFoundError(f'{os.path.abspath(config["trace_dir"])} does not exist.')
+    # if config['trace_file'] != 'Default' and not os.path.exists(os.path.join(config["trace_dir"], config['trace_file'])):
+    #     raise FileNotFoundError(f'file {config["trace_file"]} does not exist in trace_dir {os.path.abspath(config['trace_dir'])}.')
     
     return True
 # blaze_dir: Default

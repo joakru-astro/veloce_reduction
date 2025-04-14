@@ -6,7 +6,7 @@ filename: 26aug20146.fits # name of the file to reduce, if 'reduce' is 'file'
 science_targets: targets.dat # file containing a list of science targets
 calib_type: Static # Wavelength calibration to use SimLC, SimThXe, Interpolate or Static
 # secondary information for the reduction
-arm: 'red' # Which arm to reduce 'all', 'red', 'green' or 'blue'
+arm: 'all' # Which arm to reduce 'all', 'red', 'green' or 'blue'
 amplifier_mode: 4 # 2 or 4
 sim_calib: True # Flag indicating if the simultaneous calibration was used True or False
 plot_diagnostic: True # True or False
@@ -17,27 +17,21 @@ flat_field: False # True or False
 # raw_parent_dir: /Path/to/Veloce/Data/Raw # path to the directory with raw data (one in which the run directory is, i.e. input directory)
 input_dir: Data/Raw/CSV_Run # path to the directory with raw data (one in which the run directory is, i.e. input directory)
 # extracted_parent_dir: /Path/to/Veloce/Data/Extracted # path to the directory where extracted data will be stored (i.e. output directory)
-<<<<<<< HEAD
-extracted_parent_dir: Data/Extracted/ # path to the directory where extracted data will be stored (i.e. output directory)
-# below are paths where code will store intermediate files and diagnostics
-# by default, they are set as subdirectories of the output directory with extracted data
-=======
 output_dir: Data/Extracted/CSV_Run # path to the directory where extracted data will be stored (i.e. output directory)
+
 # below are paths where code will stor intermediet files and diagnostics
 # by default they are set as subdirectories of output directory with extracted data
->>>>>>> 0e91fc0 (Included diagnostic plots and improved config)
 blaze_dir: Default
 master_dir: Default
 wavelength_calibration_dir: Default
 # obs_list_dir: Default
 plot_dir: Default
 log_dir: Default
+
 # below are paths where the code will look for internal files
 # leave as default unless you know what you are doing
 # veloce_reduction_dir: Default
 trace_dir: Default # path to the directory with traces to be extracted
-<<<<<<< HEAD
-wave_dir: Default # path to the directory static wavelength solution
-=======
+trace_file: Default # filename of the file with traces to be extracted
+# trace_file: "veloce_red_2amp_sim_calib_trace_2025-04-04.pkl"
 wave_dir: Default # path to the directory with static wavelength solution
->>>>>>> 0e91fc0 (Included diagnostic plots and improved config)
