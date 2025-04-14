@@ -102,14 +102,14 @@ def load_log_info(log_path, science_targets, selected_arm, day):
     obs_list = {'flat_red': [], 'flat_green': [], 'flat_blue': [], 'flat_blue_long': [],
                 'ARC-ThAr': [], 'SimThLong': [], 'SimTh': [], 'SimLC': [],
                 'dark': [], 'bias': [], 'science': []}
-    arms = {'red': 3, 'green': 2, 'blue': 1}
+    arms = {'red': 3, 'green': 2, 'blue': 1, 'all': None}
     with open(log_path, 'r') as f:
         lines = f.readlines()
         for line in lines[10:]:
             if line[0:4].isdigit():
                 run, arm, target, exp_time = [line.split()[i] for i in [0, 1, 2, 5]]
                 file_name = f'{day}{arm}{run}.fits'
-                if int(arm) == arms[selected_arm]:
+                if int(arm) == arms[selected_arm] or selected_arm == 'all':
                     if target.strip() == 'BiasFrame':
                         obs_list['bias'].append(file_name)
                     elif target.strip() == 'FlatField-Quartz':
