@@ -209,3 +209,4 @@ def get_obs_list(summary, target=None):
     
     return summary_final
 # def load_multi_logs(science_targets, data_path, run, days, dates, logs_names):
+

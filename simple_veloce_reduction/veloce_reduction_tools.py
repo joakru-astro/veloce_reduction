@@ -258,7 +258,6 @@ class Traces:
 
         _traces = []
         ylen, xlen = frame.shape
-        # full_y = range(ylen)
         for order in range(len(self.x)):
             iteration = 0
             x_prev = self.x[order]
@@ -1358,7 +1357,7 @@ def get_master_mmap(obs_list, master_type, data_path, run, date, arm):
         header = hdul[0].header
 
     # Create a memory-mapped file to store the frames
-    mmap_file = np.memmap('frames.dat', dtype='float32', mode='w+', shape=(num_files, *frame_shape))
+    mmap_file = np.memmap('frames.dat', dtype='float16', mode='w+', shape=(num_files, *frame_shape))
 
     # Read each FITS file and store the data in the memory-mapped file
     for i, file_name in enumerate(file_list):
