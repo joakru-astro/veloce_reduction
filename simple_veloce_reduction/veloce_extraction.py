@@ -41,7 +41,7 @@ def load_trace_data(arm, trace_path, sim_calib=False, filename=None):
     traces = veloce_reduction_tools.Traces.load_traces(filename)
     return traces
 
-def remove_scattered_light(frame, hdr, traces, diagnostic):
+def remove_scattered_light(frame, hdr, traces, diagnostic=False):
     """
     Remove scattered light from the image.
     """
@@ -98,7 +98,7 @@ def get_flat(veloce_paths, arm, amplifier_mode, date, obs_list):
 def extract_run(target_list, config, veloce_paths, obs_list):
     """
     Extracts spectral data from Veloce observations without applying blaze correction.
-
+    
     This function processes observation data for a specific run and spectrograph arm from Veloce.
     It loads wave calibration data, trace data, and modifies summing ranges based on the
     specified arm. The function is designed to work with 'green' and 'red' arms, with a note to add
@@ -156,9 +156,9 @@ def extract_run(target_list, config, veloce_paths, obs_list):
         if config['calib_type'] == 'Static':
             static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
         elif config['calib_type'] == 'Interpolate':
-            wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation()
+            wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation(target_list, obs_list, veloce_paths)
         else:
-            pass
+            pass #load LC reference
 
         for date in target_list.keys(): 
             if config['flat_field']:
@@ -188,18 +188,19 @@ def extract_run(target_list, config, veloce_paths, obs_list):
                         
                         if config['calib_type'] == 'Static':
                             final_wave = static_wave
+                            final_flux = extracted_science_orders
                         elif config['calib_type'] == 'Interpolate':
-                            final_wave = veloce_wavecalib.interpolate_wave(
+                            final_wave, final_flux = veloce_wavecalib.interpolate_wave(
                                 extracted_science_orders, hdr)
                         elif config['calib_type'] == 'SimThXe':
                             final_wave = veloce_wavecalib.calibrate_simTh(
                                 extracted_science_orders, hdr)
+                            final_flux = extracted_science_orders
                         elif config['calib_type'] == 'SimLC':
-                            final_wave = veloce_wavecalib.calibrate_simLC(
-                                extracted_science_orders, hdr)
+                            final_wave, final_flux = veloce_wavecalib.calibrate_simLC(
+                                extracted_science_orders, veloce_paths, image_subtracted_bias,
+                                hdr, arm, plot=config['plot_diagnostic'])
                                         
-                        final_flux = extracted_science_orders
-
                         if config['plot_diagnostic']:
                             veloce_diagnostic.plot_order_cross_section(
                                 image_subtracted_bias, traces, 10, filename,
@@ -313,14 +314,17 @@ def extract_night(target_list, config, veloce_paths, obs_list):
                     
                     if config['calib_type'] == 'Static':
                         final_wave = static_wave
+                        final_flux = extracted_science_orders
                     elif config['calib_type'] == 'Interpolate':
-                        final_wave = veloce_wavecalib.interpolate_wave(extracted_science_orders, hdr)
+                        final_wave = veloce_wavecalib.interpolate_wave(extracted_science_orders, hdr)                    
+                        final_flux = extracted_science_orders
                     elif config['calib_type'] == 'SimThXe':
-                        final_wave = veloce_wavecalib.calibrate_simTh(extracted_science_orders, hdr)
+                        final_wave = veloce_wavecalib.calibrate_simTh(extracted_science_orders, hdr)                    
+                        final_flux = extracted_science_orders
                     elif config['calib_type'] == 'SimLC':
-                        final_wave = veloce_wavecalib.calibrate_simLC(extracted_science_orders, hdr)
-                    
-                    final_flux = extracted_science_orders
+                            final_wave, final_flux = veloce_wavecalib.calibrate_simLC(
+                                extracted_science_orders, veloce_paths, image_subtracted_bias,
+                                hdr, arm, plot=config['plot_diagnostic'])
 
                     if config['plot_diagnostic']:
                             veloce_diagnostic.plot_order_cross_section(
@@ -399,15 +403,18 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
                     image_subtracted_bias, traces, remove_background=False)
                 
                 if config['calib_type'] == 'Static':
-                    final_wave = static_wave
+                    final_wave = static_wave                    
+                    final_flux = extracted_science_orders
                 elif config['calib_type'] == 'Interpolate':
-                    final_wave = veloce_wavecalib.interpolate_wave(extracted_science_orders, hdr)
+                    final_wave = veloce_wavecalib.interpolate_wave(extracted_science_orders, hdr)                    
+                    final_flux = extracted_science_orders
                 elif config['calib_type'] == 'SimThXe':
-                    final_wave = veloce_wavecalib.calibrate_simTh(extracted_science_orders, hdr)
+                    final_wave = veloce_wavecalib.calibrate_simTh(extracted_science_orders, hdr)                    
+                    final_flux = extracted_science_orders
                 elif config['calib_type'] == 'SimLC':
-                    final_wave = veloce_wavecalib.calibrate_simLC(extracted_science_orders, hdr)
-                
-                final_flux = extracted_science_orders
+                            final_wave, final_flux = veloce_wavecalib.calibrate_simLC(
+                                extracted_science_orders, veloce_paths, image_subtracted_bias,
+                                hdr, arm, plot=config['plot_diagnostic'])
 
                 if config['plot_diagnostic']:
                             veloce_diagnostic.plot_order_cross_section(

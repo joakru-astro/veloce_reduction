@@ -7,20 +7,21 @@ data_dirs = {'red': 'ccd_3', 'green': 'ccd_2', 'blue': 'ccd_1'}
 class VelocePaths:
     # what if I drop using 'run' and just use input/output dir?
     # def __init__(self, input_path, output_path, run=None):
-    def __init__(self, input_dir, output_dir, run=None):
+    def __init__(self, input_dir=None, output_dir=None, run=None):
         self.reduction_parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         # self.raw_parent_dir = os.path.join(self.reduction_parent_dir, 'Data', 'Raw')
-        input_dir = os.path.abspath(input_dir)
-        if not os.path.exists(input_dir):
-            raise FileNotFoundError(f"Input path does not exist: {input_dir}")
-        else:
-            self.input_dir = input_dir
-            if run is not None:
-                if input_dir.split('/')[-1] != run:
-                    raise FileNotFoundError(f"A run {run} was selected but doesn't match input directory name: {os.path.join(os.getcwd(), input_dir)}")
+        if input_dir is not None:
+            input_dir = os.path.abspath(input_dir)
+            if not os.path.exists(input_dir):
+                raise FileNotFoundError(f"Input path does not exist: {input_dir}")
             else:
-                run = input_dir.split('/')[-1]
-                print(f"Warning: No run selected, using input directory name {run}.")
+                self.input_dir = input_dir
+                if run is not None:
+                    if input_dir.split('/')[-1] != run:
+                        raise FileNotFoundError(f"A run {run} was selected but doesn't match input directory name: {os.path.join(os.getcwd(), input_dir)}")
+                else:
+                    run = input_dir.split('/')[-1]
+                    print(f"Warning: No run selected, using input directory name {run}.")
         # if run in os.listdir(os.path.join(os.getcwd(), input_dir)):
         #     self.raw_parent_dir = os.path.join(os.getcwd(), input_dir)
         # elif input_dir.split('/')[-1] == run:
@@ -31,16 +32,18 @@ class VelocePaths:
         #     self.raw_parent_dir = input_dir
             
         # self.extracted_parent_dir = os.path.join(self.reduction_parent_dir, 'Data', 'Extracted')
-        output_dir = os.path.abspath(output_dir)
-        if not os.path.exists(output_dir):
-            raise FileNotFoundError(f'Output path does not exist: {output_dir}')
-        else:
-            if output_dir.split('/')[-1] == run:
-                self.output_dir = output_dir
+        if output_dir is not None:
+            output_dir = os.path.abspath(output_dir)
+            if not os.path.exists(output_dir):
+                raise FileNotFoundError(f'Output path does not exist: {output_dir}')
             else:
-                print(f"Warning: Output directory name: {output_dir},\n does not match run name: {run}")
-                print("Creating output subdirectory with run name.")
-                self.output_dir = os.path.join(output_dir, run)
+                if output_dir.split('/')[-1] == run:
+                    self.output_dir = output_dir
+                else:
+                    print(f"Warning: Output directory name: {output_dir},\n does not match run name: {run}")
+                    # print("Creating output subdirectory with run name.")
+                    # self.output_dir = os.path.join(output_dir, run)
+                    self.output_dir = output_dir
         
         self.wave_dir = os.path.join(self.reduction_parent_dir, 'Wave')
         self.trace_dir = os.path.join(self.reduction_parent_dir, 'Trace')
@@ -56,9 +59,12 @@ class VelocePaths:
         self.plot_dir = os.path.join(self.intermediate_dir, 'Plots')
         if not os.path.exists(self.plot_dir):
             os.makedirs(self.plot_dir)
-        self.log_dir = os.path.join(self.intermediate_dir, 'Reduction_logs')
-        if not os.path.exists(self.log_dir):
-            os.makedirs(self.log_dir)
+        # self.log_dir = os.path.join(self.intermediate_dir, 'Reduction_logs')
+        # if not os.path.exists(self.log_dir):
+        #     os.makedirs(self.log_dir)
+        self.trace_shift_dir = os.path.join(self.intermediate_dir, 'Trace_shifts')
+        if not os.path.exists(self.trace_shift_dir):
+            os.makedirs(self.trace_shift_dir)
         self.wavelength_calibration_dir = os.path.join(self.intermediate_dir, 'Wavelength_calibration')
         if not os.path.exists(self.wavelength_calibration_dir):
             os.makedirs(self.wavelength_calibration_dir)
@@ -98,18 +104,20 @@ class VelocePaths:
         if config['trace_dir'] != 'Default':
             paths.trace_dir = os.path.abspath(config['trace_dir'])
         # intermediate paths
-        if config['blaze_dir'] != 'Default':
-            paths.blaze_dir = os.path.abspath(config['blaze_dir'])
+        # if config['blaze_dir'] != 'Default':
+        #     paths.blaze_dir = os.path.abspath(config['blaze_dir'])
         if config['master_dir'] != 'Default':
             paths.master_dir = os.path.abspath(config['master_dir'])
         if config['wavelength_calibration_dir'] != 'Default':
             paths.wavelength_calibration_dir = os.path.abspath(config['wavelength_calibration_dir'])
+        if config['trace_shift_dir'] != 'Default':
+            paths.wavelength_calibration_dir = os.path.abspath(config['trace_shift_dir'])
         # if config['obs_list_dir'] != 'Default':
         #     paths.obs_list_dir = config['obs_list_dir']
         if config['plot_dir'] != 'Default':
             paths.plot_dir = config['plot_dir']
-        if config['log_dir'] != 'Default':
-            paths.log_dir = config['log_dir']
+        # if config['log_dir'] != 'Default':
+        #     paths.log_dir = config['log_dir']
         # paths.update_run(config['run'])
         return paths
     
