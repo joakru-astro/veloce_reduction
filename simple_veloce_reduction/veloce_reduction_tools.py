@@ -3,11 +3,12 @@ import pickle
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import median_filter, label, find_objects
+from scipy.ndimage import median_filter, label, find_objects, zoom
+from scipy.interpolate import RBFInterpolator
 from csaps import csaps
-# from cv2 import connectedComponentsWithStats, merge
+from astropy.io.fits import PrimaryHDU
 
-from . import veloce_path
+from . import veloce_config
 
 import numpy as np
 
@@ -152,7 +153,7 @@ class Traces:
         and is recommended.
         """
         if trace_dir is None:
-            veloce_paths = veloce_path.VelocePaths()
+            veloce_paths = veloce_config.VelocePaths()
             trace_dir = veloce_paths.trace_dir
         if filename:
             filename = f'{trace_dir}/{filename}.pkl'
@@ -257,7 +258,6 @@ class Traces:
 
         _traces = []
         ylen, xlen = frame.shape
-        # full_y = range(ylen)
         for order in range(len(self.x)):
             iteration = 0
             x_prev = self.x[order]
@@ -277,7 +277,7 @@ class Traces:
                         fit_x.append(np.nan)
                         fit_y.append(np.nan)
                 if not mute: print(f'Iteration {iteration}: adjustment = {np.nanmedian(x_prev - np.array(fit_x))}')
-                x_current = x_prev - np.nanmedian(x_prev - np.array(fit_x))
+                x_current = x_prev + np.nanmedian(np.array(fit_x) - x_prev)
                 # Check for convergence
                 if np.sum(np.abs(x_current - x_prev)) < tolerance:
                     if not mute: print(f'Converged after {iteration} iterations.')
@@ -335,6 +335,7 @@ class Traces:
             wave_calib_slice=wave_calib_slice
         )
 
+### Image processing functions
 def remove_overscan_bias(frame, hdr, overscan_range=32, amplifier_mode=4):
     """
     Removes the overscan bias from an image frame by subtracting the median of the overscan regions.
@@ -396,7 +397,7 @@ def remove_overscan_bias(frame, hdr, overscan_range=32, amplifier_mode=4):
         # middle
         q3_overscan_mask[ydiv:,xdiv:xdiv+overscan_range] = 1
         q3_overscan_mask[ydiv:ydiv+overscan_range,xdiv:] = 1
-        # edge
+        # edgeusing remove_overscan_bias function
         q3_overscan_mask[ydiv:,xlen-overscan_range:] = 1
         q3_overscan_mask[ylen-overscan_range:,xdiv:] = 1
         q3 -= np.median(frame[q3_overscan_mask == 1])
@@ -666,6 +667,54 @@ def get_orders_masks(binarized):
     
     orders = np.array(orders, dtype=np.uint16)
     return orders
+
+def fit_background(frame, traces, x_range=5, y_step=20, kernel='thin_plate_spline', smoothing=1, downsample_factor=0.1):
+    """
+    Fit the background of a given frame using radial basis function (RBF) interpolation.
+    
+    Parameters:
+    - frame (numpy.ndarray): The 2D array representing the image frame from which the background is to be extracted.
+    - traces (object): An object containing the trace information.
+    - x_range (int, optional): The range around each trace position to consider for fitting. Default is 5 pixels.
+    - y_step (int, optional): The step size for sampling the traces. Default is 20.
+    - kernel (str, optional): The kernel to use for the RBF interpolation. Default is 'thin_plate_spline'.
+    - smoothing (float, optional): The smoothing factor for the RBF interpolation. Default is 1.
+    - downsample_factor (float, optional): The factor by which to downsample the grid for interpolation. Default is 0.1.
+
+    Returns:
+    - numpy.ndarray: The 2D array representing the fitted background of the same shape as the input frame.
+    """
+    # # verify x_range
+    # for i in range(len(traces)-1):
+    #     if np.any((traces.x[i][::y_step]+traces.x[i+1][::y_step])/2+x_range>traces.x[i+1]-traces.summing_ranges_lower) or np.any((traces.x[i][::y_step]+traces.x[i+1][::y_step])/2-x_range>traces.x[i]+traces.summing_ranges_upper):
+    #        raise ValueError(f'x_range = {x_range} is too large for the given traces.')
+    # # verify y_step
+    # if frame.shape[0]/y_step < 100:
+    #     raise ValueError(f'y_step = {y_step} is too big for the frame resulting grid is too sparse.')
+    
+    # Extract the background values and coordinates
+    background_values = [[np.nanmedian(frame[int(y), int((x1+x2)/2-x_range):int((x1+x2)/2+x_range)]) for y, x1, x2 in zip(traces.y[i][::y_step], traces.x[i][::y_step], traces.x[i+1][::y_step])] for i in range(len(traces)-1)]
+    background_values = np.hstack(background_values)
+    background_points = [[(y, (x1+x2)/2) for y, x1, x2 in zip(traces.y[i][::y_step], traces.x[i][::y_step], traces.x[i+1][::y_step])] for i in range(len(traces)-1)]
+    background_points = np.vstack(background_points)
+
+    # Create the RBF interpolator
+    rbf = RBFInterpolator(background_points, background_values, kernel=kernel, smoothing=smoothing)
+
+    # Create a downsampled grid for the interpolation
+    grid_shape = frame.shape
+    downsampled_shape = (int(grid_shape[0] * downsample_factor), int(grid_shape[1] * downsample_factor))
+    grid_y, grid_x = np.mgrid[0:grid_shape[0]:downsampled_shape[0]*1j, 0:grid_shape[1]:downsampled_shape[1]*1j]
+    grid_points = np.vstack((grid_y.ravel(), grid_x.ravel())).T
+
+    # Interpolate on the downsampled grid
+    downsampled_background = rbf(grid_points).reshape(downsampled_shape)
+
+    # Upsample the interpolated background to the original grid shape
+    background = zoom(downsampled_background, (grid_shape[0] / downsampled_shape[0], grid_shape[1] / downsampled_shape[1]), order=1)
+    background[background < 0] = 0
+
+    return background    
 
 ### old version
 # def get_orders_masks(binarized):
@@ -1095,7 +1144,7 @@ def load_prefitted_wavecalib_trace(arm='red', calib_type='Th', trace_path=None, 
   """
 
   if trace_path is None:
-      veloce_paths = veloce_path.VelocePaths()
+      veloce_paths = veloce_config.VelocePaths()
       trace_path = veloce_paths.trace_dir
   if filename is not None:
       filename = os.path.join(trace_path, filename)
@@ -1163,7 +1212,7 @@ def load_prefitted_wave(arm='red', wave_calib_slice=slice(None), wave_path=None,
       matched wavelengths, etc.).
     """
     if wave_path is None:
-        veloce_paths = veloce_path.VelocePaths()
+        veloce_paths = veloce_config.VelocePaths()
         wave_path = veloce_paths.wave_dir
 
     if filename is not None:
@@ -1348,7 +1397,7 @@ def get_master_mmap(obs_list, master_type, data_path, run, date, arm):
         header = hdul[0].header
 
     # Create a memory-mapped file to store the frames
-    mmap_file = np.memmap('frames.dat', dtype='float32', mode='w+', shape=(num_files, *frame_shape))
+    mmap_file = np.memmap('frames.dat', dtype='float16', mode='w+', shape=(num_files, *frame_shape))
 
     # Read each FITS file and store the data in the memory-mapped file
     for i, file_name in enumerate(file_list):
@@ -1365,7 +1414,66 @@ def get_master_mmap(obs_list, master_type, data_path, run, date, arm):
 
     return master_frame, header
 
-def save_image_fits(filename, output_path, image, hdr):
+# def make_normalised_master_flat(master_filename, master_path, amplifier_mode):
+def get_normalised_master_flat(flat, hdr):
+    """
+    Create a normalized master flat field image.
+    This function takes a flat field image and its header, smooths the flat field
+    image using cubic smoothing splines, and then normalizes the flat field image
+    by dividing it by the smoothed version. Any non-positive values in the normalized
+    flat field image are set to 1.
+
+    Parameters:
+    - flat (numpy.ndarray): The input flat field image.
+    - hdr (astropy.io.fits.Header): The FITS header associated with the flat field image.
+    
+    Returns:
+    - tuple: A tuple containing the normalized flat field image (numpy.ndarray) and the
+           modified FITS header (astropy.io.fits.Header).
+    """
+    # with fits.open(os.path.join(master_path, master_filename)) as hdul:
+    #     flat_image = hdul[0].data
+    #     hdr = hdul[0].header
+    # flat_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(flat_image, hdr, overscan_range=32, amplifier_mode=amplifier_mode)
+
+    y = np.arange(flat.shape[0])
+    smoothed_flat = np.array([csaps(y, flat[:, col], y, smooth=0.5) for col in range(flat.shape[1])]).T    
+        
+    normalised_flat = flat / (smoothed_flat)
+    if np.any(normalised_flat <= 0):
+        print(np.min(normalised_flat), np.sum(normalised_flat <= 0))
+        normalised_flat[normalised_flat <= 0] = 1
+
+    # normalised_flat_name = master_filename.split('.')[0]+'_norm.fits'
+    # veloce_reduction_tools.save_image_fits(normalised_flat_name, master_path, normalised_flat, hdr)
+    
+    ### TODO: modify header to reflect that it is a normalised flat
+    
+    return normalised_flat, hdr
+
+def flat_field_correction(frame, flat, hdr):
+    """
+    Corrects an astronomical image for flat-fielding using a normalised flat-field frame.
+
+    This function performs flat-field correction on an astronomical image using a normalised flat-field frame.
+    The function divides the image by the flat-field frame to remove pixel-to-pixel variations in the detector
+    response and create a flat-field corrected image.
+
+    Parameters:
+    - frame (numpy.ndarray): A 2D numpy array representing the astronomical image to correct.
+    - flat (numpy.ndarray): A 2D numpy array representing the normalised flat-field frame.
+    - hdr (astropy.io.fits.header.Header): An Astropy header object containing metadata information for the image.
+
+    Returns:
+    - tuple: A tuple containing 2D numpy array representing the flat-field corrected image and modified header.
+    """
+    if frame.shape != flat.shape:
+        raise ValueError("Frame and flat field image must have the same shape.")
+    flat_corrected_image = frame / flat
+    hdr['HISTORY'] = 'Flat-field corrected'
+    return flat_corrected_image, hdr
+
+def save_image_fits(filename, image, hdr):
     """
     Saves a 2D image array to a FITS file with a specified header.
 
@@ -1376,7 +1484,6 @@ def save_image_fits(filename, output_path, image, hdr):
 
     Parameters:
     - filename (str): The name of the FITS file to save the image to.
-    - output_path (str): The path to the directory where the FITS file will be saved.
     - image (numpy.ndarray): A 2D numpy array representing the image data to save.
     - hdr (astropy.io.fits.header.Header): An Astropy header object containing metadata information for the image.
 
@@ -1389,11 +1496,10 @@ def save_image_fits(filename, output_path, image, hdr):
     """
     hdu = fits.PrimaryHDU(image, header=hdr)
     hdul = fits.HDUList([hdu])
-    output_filename = os.path.join(output_path, filename)
-    hdul.writeto(output_filename, overwrite=True)
-    return output_filename 
+    hdul.writeto(filename, overwrite=True)
+    return filename 
 
-def save_extracted_spectrum_fits(filename, output_path, wave, flux, hdr):
+def save_extracted_spectrum_fits(filename, wave, flux, hdr):
     """
     Saves a 2D spectrum array to a FITS file with a specified header.
 
@@ -1421,7 +1527,7 @@ def save_extracted_spectrum_fits(filename, output_path, wave, flux, hdr):
         hdu_wave = fits.ImageHDU(wave, name='WAVE')
         hdu_flux = fits.ImageHDU(flux, name='FLUX')
     else:
-        max_length = max(len(order) for order in wave)
+        max_length = max([len(order) for order in wave])
         wave_padded = np.array([np.pad(order, (0, max_length - len(order)), constant_values=np.nan) for order in wave])
         flux_padded = np.array([np.pad(order, (0, max_length - len(order)), constant_values=np.nan) for order in flux])
         hdu_wave = fits.ImageHDU(wave_padded, name='WAVE')
@@ -1435,9 +1541,9 @@ def save_extracted_spectrum_fits(filename, output_path, wave, flux, hdr):
     # hdr['CTYPE2'] = 'Flux'
     # hdr['CUNIT1'] = 'Nm'
     hdul[0].header = hdr
-    output_filename = os.path.join(output_path, filename)
-    hdul.writeto(output_filename, overwrite=True)
-    return output_filename
+    
+    hdul.writeto(filename, overwrite=True)
+    return filename
 
 def load_extracted_spectrum_fits(filename):
     """

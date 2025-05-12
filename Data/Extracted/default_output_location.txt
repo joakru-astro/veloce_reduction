@@ -1,1 +1,0 @@
-The default location for extracted data in the veloce_path.py file, edit paths in that file to change output (or specify output location during script execution).
