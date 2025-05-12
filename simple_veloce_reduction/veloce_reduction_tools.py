@@ -1275,6 +1275,46 @@ def calibrate_orders_to_wave(orders, Y0, coefficients, traces=None):
     wave = [np.polyval(coeff[::-1], y) for y, coeff in zip(y_arr, coefficients)]
     return wave
 
+def vacuum_to_air(wave):
+    """
+    Convert vacuum wavelengths to air wavelengths.
+
+    Parameters:
+    - wave (float or array-like): Wavelengths in vacuum to be converted to air.
+
+    Returns:
+    - air_wave (array-like): Wavelengths converted to air.
+
+    Notes:
+    The vacuum to air conversion - formula from Donald Morton 
+    (2000, ApJ. Suppl., 130, 403) for the refraction index, 
+    which is also the IAU standard.
+    Taken from VALDwiki
+    https://www.astro.uu.se/valdwiki/Air-to-vacuum%20conversion
+    """
+    s = (10**4 / (wave*10))**2
+    n = 1 + 0.0000834254 + 0.02406147 / (130 - s**2) + 0.00015998 / (38.9 - s**2)
+    return (wave*10 / n)/10
+    
+def air_to_vacuum(wave):
+    """
+    Convert air wavelengths to vacuum wavelengths.
+
+    Parameters:
+    - wave (float or array-like): Wavelengths in air to be converted.
+
+    Returns:
+    - vacuum_wave (float or array-like): Corresponding wavelengths in vacuum.
+
+    Notes:
+    VALD3 tools use the following solution derived by N. Piskunov and I follow it here.
+    Taken from VALDwiki
+    https://www.astro.uu.se/valdwiki/Air-to-vacuum%20conversion
+    """
+    s = (10**4 / (wave*10))**2
+    n = 1 + 0.00008336624212083 + 0.02408926869968 / (130.1065924522 - s) + 0.0001599740894897 / (38.92568793293 - s)
+    return (wave*10 / n)/10
+
 def get_master(obs_list, master_type, data_path, run, date, arm):
     """
     Generates a master frame by median combining individual frames for a given observation type and date.
