@@ -117,7 +117,7 @@ def fit_lc_peak(pix_shift, ccf):
     fitting_limit = np.ceil(np.mean(np.diff(signal.find_peaks(ccf)[0])))/2 + 1
     _pix_shift = pix_shift[abs(pix_shift) <= fitting_limit]
     _ccf = ccf[abs(pix_shift) <= fitting_limit]
-    _ccf -= np.min(_ccf)
+    # _ccf -= np.min(_ccf)
 
     # fit a generalised gaussian to the peak
     peak_arg = np.argmax(_ccf)
@@ -125,7 +125,7 @@ def fit_lc_peak(pix_shift, ccf):
     peak_position = _pix_shift[peak_arg]
     sigma = 0.8
     beta = 2.0
-    baseline = 0.0
+    baseline = np.min(_ccf)
 
     popt, _ = curve_fit(general_gaussian, _pix_shift, _ccf,
                         p0=[peak, peak_position, sigma, beta, baseline],
@@ -134,17 +134,19 @@ def fit_lc_peak(pix_shift, ccf):
     return popt[1], popt
 
 def plot_ccf(PIX, CCF, order, chunk):
+    fitting_limit = np.ceil(np.mean(np.diff(signal.find_peaks(CCF[order-1][chunk])[0])))/2 + 1
     plt.figure(figsize=(10, 6))
     plt.title('Cross-Correlation Function')
     plt.plot(PIX[order-1][chunk], CCF[order-1][chunk], label=f'Order {order}')
     shift, popt = fit_lc_peak(PIX[order-1][chunk], CCF[order-1][chunk])
+    print(f"Amplitude: {popt[0]}\n Shift: {popt[1]}\n Sigma: {popt[2]}\n Beta: {popt[3]}\n Baseline: {popt[4]}")
     subpixel = np.arange(np.min(PIX[order-1][chunk]), np.max(PIX[order-1][chunk]), 0.01)
     plt.plot(subpixel, general_gaussian(subpixel, *popt), label='Gaussian Fit', linestyle='--')
     plt.axvline(shift, color='r', linestyle='--', label='Peak Position')
     plt.title(f'Cross-Correlation Function for Order {order}, Shift = {popt[1]:.2f}')
     plt.xlabel('Pixel Shift')
     plt.ylabel('Cross-Correlation')
-    plt.xlim(-10, 10)
+    plt.xlim(-1*fitting_limit, fitting_limit)
     plt.legend()
     plt.grid()
     plt.show()
@@ -336,19 +338,34 @@ def estimate_calibration_precision(residuals, order, ref_wave):
     
     return calibration_precision
 
+def apply_wavelength_shift(wave, arm, veloce_paths):
+    # Apply the wavelength shift to the spectrum
+    shifts = np.load(os.path.join(veloce_paths.wave_dir, f'{arm}_velocity_orders_offsets.npy'))
+    if len(wave) != len(shifts):
+        raise ValueError(f"Number of orders in wave ({len(wave)}) does not match number of predetermined offsets ({len(shifts)})")
+    for i, v in enumerate(shifts):
+        # Calculate the convertion factor
+        # v is in km/s, c is in m/s, convert will be in nm
+        convert = 1 - 1000*v / c.value
+        # Shift the spectrum order
+        wave[i] *= convert
+    return wave
+
 def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, plot=False):
     if arm == 'blue':
         print("[warning] Blue arm is not supported for LC calibration.")
         return np.array([None]), np.array([None])
     ref_orders, ref_wave, ref_intensity, ref_pixel = load_LC_wave_reference(veloce_paths, arm)
     lc_intensity, lc_pixel, order_slice, pixel_slices = load_simultanous_LC(lc_image, veloce_paths, hdr, arm, ref_orders=ref_orders, ref_pixel=ref_pixel)
-    # align extracted orders with calibrated orders and ranges
+    # align extracted orders with calibrated orders and pixel ranges
     extracted_science_orders = extracted_science_orders[order_slice]
     extracted_science_orders = [order[pixel_slices[i]] for i, order in enumerate(extracted_science_orders)]
     extracted_science_orders = pad_array(extracted_science_orders, ref_pixel)
 
+    # cross-correlate the observed LC pixel positions with the reference LC pixel positions
     dispersion_position, orders_position, offset_array = calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_pixel, plot=plot)
     
+    # fit a surface to the offset map
     results = []
     for degree in range(1, 4):
         fit_result = fit_surface(dispersion_position, orders_position, offset_array, lc_pixel, degree=degree)
@@ -358,11 +375,14 @@ def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, 
     best_fit = min(results, key=lambda result: np.std(result[3]))
     surface_points, coeffs, filtered_points, residuals = best_fit
 
+    # estimate the calibration precision
     calibration_precision = estimate_calibration_precision(residuals, 18, ref_wave)
 
+    # interpolate wavelength solution to pixel positions
     wave = interpolate_offsets_optimised(lc_pixel, surface_points, ref_wave, ref_pixel)
-
-
+    
+    # apply shift between calibration fiber and science fibers expressed as rv
+    wave = apply_wavelength_shift(wave, arm, veloce_paths)
 
     return wave,  extracted_science_orders
 
