@@ -1,6 +1,11 @@
 /Data/
 /Master/
 /veloce_reduction.ipynb
-/simple_veloce_reduction/__pycache__/
+/simple_veloce_reduction/__pycache__
 background.ipynb
 /docs/
+ispec.log
+ispec_ccf.ipynb
+lc_ccf.ipynb
+veloce_trace.ipynb
+veloce_wave_calib.ipynb
