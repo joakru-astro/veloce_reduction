@@ -336,7 +336,32 @@ class Traces:
         )
 
 ### Image processing functions
-def remove_overscan_bias(frame, hdr, overscan_range=32, amplifier_mode=4):
+def determine_amplifier_mode(hdr):
+    """
+    Determines the amplifier mode (2 or 4) and gain for quadrant (or half) number 1 from the FITS header.
+
+    Parameters:
+    - header (astropy.io.fits.Header): The FITS header.
+    Returns:
+    - amplifier_mode (int): The amplifier mode, either 2 or 4.
+    - gain (float): The gain value for the first amplifier.
+    """
+    gains = []
+    for n in range(1, 5):
+        try:
+            gains.append(float(hdr[f'DETA{n}GN']))
+        except KeyError:
+            print(f'Gain for amplifier {n} not found in header.')            
+    amplifier_mode = len(gains)
+    if amplifier_mode not in [2, 4]:
+        raise ValueError("Invalid amplifier mode. Amplifier mode must be 2 or 4.")
+    gains = np.array(gains)
+    if not np.all(gains == gains[0]):
+        print(f'[Warining]: Gains are not equal: {gains}')
+
+    return amplifier_mode, gains[0]
+
+def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
     """
     Removes the overscan bias from an image frame by subtracting the median of the overscan regions.
 
@@ -356,83 +381,111 @@ def remove_overscan_bias(frame, hdr, overscan_range=32, amplifier_mode=4):
     - The function assumes the image is divided into quadrants symmetrically.
     - The input frame is modified in place for each quadrant before recombination.
     """
+    amp_mode, gain = determine_amplifier_mode(hdr)
+
+    if amplifier_mode != amp_mode:
+        raise ValueError(f"Detected amplifier mode ({amp_mode}) does not match amplifier mode from config ({amplifier_mode}).")
+
     ylen, xlen = frame.shape
     xdiv, ydiv = int(xlen/2), int(ylen/2)
 
     # overscan_mask = np.zeros_like(frame)
     if amplifier_mode == 4:
+        if arm == 'red':
+            gain_ratio_q2_q1 = 1.0616 # +/- 0.0006
+            gain_ratio_q3_q4 = 1.0447 # +/- 0.0016
+            gain_ratio_q4_q1 = 1.0410 # +/- 0.0023
+        elif arm == 'green':
+            gain_ratio_q2_q1 = 1.0134 # +/- 0.0014
+            gain_ratio_q3_q4 = 1.0134 # +/- 0.0022
+            gain_ratio_q4_q1 = 1.0021 # +/- 0.0039
+        elif arm == 'blue':
+            gain_ratio_q2_q1 = 0.9908 # +/- 0.0018
+            gain_ratio_q3_q4 = 0.989  # +/- 0.006
+            gain_ratio_q4_q1 = 0.9945 # +/- 0.0019
         # top left - Q1
-        q1 = frame[overscan_range:ydiv-overscan_range, overscan_range:xdiv-overscan_range].copy().astype(np.float64)
+        q1 = frame[ydiv+overscan_range:ylen-overscan_range,overscan_range:xdiv-overscan_range].copy().astype(np.float64) 
         q1_overscan_mask = np.zeros_like(frame)
         # middle
-        q1_overscan_mask[:ydiv,xdiv-overscan_range:xdiv] = 1
-        q1_overscan_mask[ydiv-overscan_range:ydiv,:xdiv] = 1
+        q1_overscan_mask[ydiv:,xdiv-overscan_range:xdiv] = 1
+        q1_overscan_mask[ydiv:ydiv+overscan_range,:xdiv] = 1
         # edge
-        q1_overscan_mask[:ydiv,:overscan_range] = 1
-        q1_overscan_mask[:overscan_range,:xdiv] = 1
+        q1_overscan_mask[ydiv:,:overscan_range] = 1
+        q1_overscan_mask[ylen-overscan_range:,:xdiv] = 1
         q1 -= np.median(frame[q1_overscan_mask == 1])
         q1[q1 < 0] = 0
-        q1_gain = float(hdr['DETA1GN'])
+        q1_gain = gain
         print(f'Gain for quadrant 1: {q1_gain}')
         q1 /= q1_gain
 
         # bottom left - Q2
-        q2 = frame[ydiv+overscan_range:ylen-overscan_range,overscan_range:xdiv-overscan_range].copy().astype(np.float64) 
+        q2 = frame[overscan_range:ydiv-overscan_range, overscan_range:xdiv-overscan_range].copy().astype(np.float64)
         q2_overscan_mask = np.zeros_like(frame)
         # middle
-        q2_overscan_mask[ydiv:,xdiv-overscan_range:xdiv] = 1
-        q2_overscan_mask[ydiv:ydiv+overscan_range,:xdiv] = 1
+        q2_overscan_mask[:ydiv,xdiv-overscan_range:xdiv] = 1
+        q2_overscan_mask[ydiv-overscan_range:ydiv,:xdiv] = 1
         # edge
-        q2_overscan_mask[ydiv:,:overscan_range] = 1
-        q2_overscan_mask[ylen-overscan_range:,:xdiv] = 1
+        q2_overscan_mask[:ydiv,:overscan_range] = 1
+        q2_overscan_mask[:overscan_range,:xdiv] = 1
         q2 -= np.median(frame[q2_overscan_mask == 1])
         q2[q2 < 0] = 0
-        q2_gain = float(hdr['DETA2GN'])
+        # q2_gain = float(hdr['DETA1GN'])
+        q2_gain = q1_gain * gain_ratio_q2_q1
         print(f'Gain for quadrant 2: {q2_gain}')
         q2 /= q2_gain
 
         # bottom right - Q3
-        q3 = frame[ydiv+overscan_range:ylen-overscan_range,xdiv+overscan_range:xlen-overscan_range].copy().astype(np.float64)
+        q3 = frame[overscan_range:ydiv-overscan_range,xdiv+overscan_range:xlen-overscan_range].copy().astype(np.float64)
         q3_overscan_mask = np.zeros_like(frame)
         # middle
-        q3_overscan_mask[ydiv:,xdiv:xdiv+overscan_range] = 1
-        q3_overscan_mask[ydiv:ydiv+overscan_range,xdiv:] = 1
-        # edgeusing remove_overscan_bias function
-        q3_overscan_mask[ydiv:,xlen-overscan_range:] = 1
-        q3_overscan_mask[ylen-overscan_range:,xdiv:] = 1
+        q3_overscan_mask[:ydiv,xdiv:xdiv+overscan_range] = 1
+        q3_overscan_mask[ydiv-overscan_range:ydiv,xdiv:] = 1
+        # edge
+        q3_overscan_mask[:ydiv,xlen-overscan_range:] = 1
+        q3_overscan_mask[:overscan_range,xdiv:] = 1
         q3 -= np.median(frame[q3_overscan_mask == 1])
         q3[q3 < 0] = 0
-        q3_gain = float(hdr['DETA3GN'])
+        # q3_gain = float(hdr['DETA3GN'])
+        q3_gain = q1_gain * gain_ratio_q4_q1 * gain_ratio_q3_q4
         print(f'Gain for quadrant 3: {q3_gain}')
         q3 /= q3_gain
 
         # top right - Q4
-        q4 = frame[overscan_range:ydiv-overscan_range,xdiv+overscan_range:xlen-overscan_range].copy().astype(np.float64)
+        q4 = frame[ydiv+overscan_range:ylen-overscan_range,xdiv+overscan_range:xlen-overscan_range].copy().astype(np.float64)
         q4_overscan_mask = np.zeros_like(frame)
         # middle
-        q4_overscan_mask[:ydiv,xdiv:xdiv+overscan_range] = 1
-        q4_overscan_mask[ydiv-overscan_range:ydiv,xdiv:] = 1
+        q4_overscan_mask[ydiv:,xdiv:xdiv+overscan_range] = 1
+        q4_overscan_mask[ydiv:ydiv+overscan_range,xdiv:] = 1
         # edge
-        q4_overscan_mask[:ydiv,xlen-overscan_range:] = 1
-        q4_overscan_mask[:overscan_range,xdiv:] = 1
+        q4_overscan_mask[ydiv:,xlen-overscan_range:] = 1
+        q4_overscan_mask[ylen-overscan_range:,xdiv:] = 1
         q4 -= np.median(frame[q4_overscan_mask == 1])
         q4[q4 < 0] = 0
-        q4_gain = float(hdr['DETA4GN'])
+        # q4_gain = float(hdr['DETA4GN'])
+        q4_gain = q1_gain * gain_ratio_q4_q1
         print(f'Gain for quadrant 4: {q4_gain}')
         q4 /= q4_gain
 
         image_substracted_bias = np.concatenate(
-            (np.concatenate((q1, q2), axis=0), 
-            np.concatenate((q4, q3), axis=0)),
+            (np.concatenate((q2, q1), axis=0), 
+            np.concatenate((q3, q4), axis=0)),
             axis=1)
+        
     elif amplifier_mode == 2:
-        gain_scale = 0.964 # right/left gain ratio
-        # left - H1
+        ### right/left gain ratio
+        if arm == 'red':
+            gain_ratio = 1.0302 # +/- 0.0038
+        elif arm == 'green':
+            gain_ratio = 1.0123 # +/- 0.0035
+        elif arm == 'blue':
+            gain_ratio = 0.9970 # +/- 0.0018
+        
+        ### left - H1
         h1 = frame[overscan_range:ylen-overscan_range, overscan_range:xdiv-overscan_range].copy().astype(np.float64)
         h1_overscan_mask = np.zeros_like(frame)
-        # middle
+        ### middle
         h1_overscan_mask[:,xdiv-overscan_range:xdiv] = 1
-        # edge
+        ### edge
         h1_overscan_mask[:,:overscan_range] = 1
         h1_overscan_mask[:overscan_range,:xdiv] = 1
         h1_overscan_mask[ylen-overscan_range:,:xdiv] = 1
@@ -442,19 +495,19 @@ def remove_overscan_bias(frame, hdr, overscan_range=32, amplifier_mode=4):
         print(f'Gain for half 1: {h1_gain}')
         h1 /= h1_gain
 
-        # right - H2
+        ### right - H2
         h2 = frame[overscan_range:ylen-overscan_range,xdiv+overscan_range:xlen-overscan_range].copy().astype(np.float64)
         h2_overscan_mask = np.zeros_like(frame)
-        # middle
+        ### middle
         h2_overscan_mask[:,xdiv:xdiv+overscan_range] = 1
-        # edge
+        ### edge
         h2_overscan_mask[:,:overscan_range] = 1
         h2_overscan_mask[ylen-overscan_range:,xdiv:] = 1
         h2_overscan_mask[ylen-overscan_range:,xdiv:] = 1
         h2 -= np.median(frame[h2_overscan_mask == 1])
         h2[h2 < 0] = 0
         # h2_gain = float(hdr['DETA2GN'])
-        h2_gain = h1_gain * gain_scale
+        h2_gain = h1_gain * gain_ratio
         print(f'Gain for half 2: {h2_gain}')
         h2 /= h2_gain
 
@@ -1315,49 +1368,49 @@ def air_to_vacuum(wave):
     n = 1 + 0.00008336624212083 + 0.02408926869968 / (130.1065924522 - s) + 0.0001599740894897 / (38.92568793293 - s)
     return (wave*10 / n)/10
 
-def get_master(obs_list, master_type, data_path, run, date, arm):
-    """
-    Generates a master frame by median combining individual frames for a given observation type and date.
+# def get_master(obs_list, master_type, data_path, run, date, arm):
+#     """
+#     Generates a master frame by median combining individual frames for a given observation type and date.
 
-    This function reads FITS files specified in an observation list for a particular observation type and date,
-    combines these frames by stacking them along a new axis, and then calculates the median of these frames to
-    produce a master frame. The function is designed to work with astronomical data, specifically for the Veloce
-    spectrograph which has different CCDs (charge-coupled devices) for red, green, and blue spectral arms.
+#     This function reads FITS files specified in an observation list for a particular observation type and date,
+#     combines these frames by stacking them along a new axis, and then calculates the median of these frames to
+#     produce a master frame. The function is designed to work with astronomical data, specifically for the Veloce
+#     spectrograph which has different CCDs (charge-coupled devices) for red, green, and blue spectral arms.
 
-    Parameters:
-    - obs_list (dict): A nested dictionary where the first key is the master type (e.g., 'bias', 'flat'), the
-      second key is the date, and the value is a list of file names for that observation type and date.
-    - master_type (str): The type of master frame to generate (e.g., 'bias', 'flat').
-    - data_path (str): The base path to the directory containing the observation data.
-    - run (str): The observing run identifier, used to further specify the location of the data.
-    - date (str): The date of the observation, used to select the correct set of files from the observation list.
-    - arm (str): The spectral arm ('red', 'green', 'blue') of the data to process, which determines the CCD to use.
+#     Parameters:
+#     - obs_list (dict): A nested dictionary where the first key is the master type (e.g., 'bias', 'flat'), the
+#       second key is the date, and the value is a list of file names for that observation type and date.
+#     - master_type (str): The type of master frame to generate (e.g., 'bias', 'flat').
+#     - data_path (str): The base path to the directory containing the observation data.
+#     - run (str): The observing run identifier, used to further specify the location of the data.
+#     - date (str): The date of the observation, used to select the correct set of files from the observation list.
+#     - arm (str): The spectral arm ('red', 'green', 'blue') of the data to process, which determines the CCD to use.
 
-    Returns:
-    - numpy.ndarray: A 2D numpy array representing the median-combined master frame for the specified observation
-      type, date, and spectral arm.
+#     Returns:
+#     - numpy.ndarray: A 2D numpy array representing the median-combined master frame for the specified observation
+#       type, date, and spectral arm.
 
-    Raises:
-    - KeyError: If the specified `arm` is not one of 'red', 'green', or 'blue'.
-    - FileNotFoundError: If any of the FITS files specified in the observation list cannot be found at the
-      constructed file path.
-    """
-    data_sub_dirs = {'red': 'ccd_3', 'green': 'ccd_2', 'blue': 'ccd_1'}
-    if obs_list[master_type][date] != []:
-        for file_name in obs_list[master_type][date]:
-            fits_image_filename = os.path.join(data_path, run, date, data_sub_dirs[arm], file_name)
-            with fits.open(fits_image_filename) as hdul:
-                try:
-                    frames = np.dstack((frames, hdul[0].data))
-                except:
-                    frames = np.array(hdul[0].data)
-                    # Load placeholder header from the first file 
-                    # TODO: edit header to reflect that it is a median combined frame
-                    header = hdul[0].header
+#     Raises:
+#     - KeyError: If the specified `arm` is not one of 'red', 'green', or 'blue'.
+#     - FileNotFoundError: If any of the FITS files specified in the observation list cannot be found at the
+#       constructed file path.
+#     """
+#     data_sub_dirs = {'red': 'ccd_3', 'green': 'ccd_2', 'blue': 'ccd_1'}
+#     if obs_list[master_type][date] != []:
+#         for file_name in obs_list[master_type][date]:
+#             fits_image_filename = os.path.join(data_path, run, date, data_sub_dirs[arm], file_name)
+#             with fits.open(fits_image_filename) as hdul:
+#                 try:
+#                     frames = np.dstack((frames, hdul[0].data))
+#                 except:
+#                     frames = np.array(hdul[0].data)
+#                     # Load placeholder header from the first file 
+#                     # TODO: edit header to reflect that it is a median combined frame
+#                     header = hdul[0].header
 
-    return np.median(frames, axis=2), header
+#     return np.median(frames, axis=2), header
 
-def get_master_mmap(obs_list, master_type, data_path, run, date, arm):
+def get_master_mmap(obs_list, master_type, data_path, date, arm, amp_mode):
     """
     Generates a master frame by median combining individual frames for a given observation type and date using memory-mapped files.
 
@@ -1366,7 +1419,6 @@ def get_master_mmap(obs_list, master_type, data_path, run, date, arm):
       second key is the date, and the value is a list of file names for that observation type and date.
     - master_type (str): The type of master frame to generate (e.g., 'bias', 'flat').
     - data_path (str): The base path to the directory containing the observation data.
-    - run (str): The observing run identifier, used to further specify the location of the data.
     - date (str): The date of the observation, used to select the correct set of files from the observation list.
     - arm (str): The spectral arm ('red', 'green', 'blue') of the data to process, which determines the CCD to use.
 
@@ -1387,23 +1439,24 @@ def get_master_mmap(obs_list, master_type, data_path, run, date, arm):
         raise ValueError("No files found for the specified master type and date.")
 
     # Read the first file to get the shape of the data
-    first_file = os.path.join(data_path, run, date, data_sub_dirs[arm], file_list[0])
-    with fits.open(first_file) as hdul:
-        frame_shape = hdul[0].data.shape
-
     # Load placeholder header from the first file 
     # TODO: edit header to reflect that it is a median combined frame
+    first_file = os.path.join(data_path, date, data_sub_dirs[arm], file_list[0])
     with fits.open(first_file) as hdul:
+        frame_shape = remove_overscan_bias(hdul[0].data, hdul[0].header, arm=arm,
+                                        amplifier_mode=amp_mode, overscan_range=32).shape
         header = hdul[0].header
 
     # Create a memory-mapped file to store the frames
-    mmap_file = np.memmap('frames.dat', dtype='float16', mode='w+', shape=(num_files, *frame_shape))
+    mmap_file = np.memmap('frames.dat', dtype='float32', mode='w+', shape=(num_files, *frame_shape))
 
     # Read each FITS file and store the data in the memory-mapped file
     for i, file_name in enumerate(file_list):
-        fits_image_filename = os.path.join(data_path, run, date, data_sub_dirs[arm], file_name)
+        fits_image_filename = os.path.join(data_path, date, data_sub_dirs[arm], file_name)
         with fits.open(fits_image_filename) as hdul:
-            mmap_file[i] = hdul[0].data
+            flat = remove_overscan_bias(hdul[0].data, hdul[0].header,arm=arm,
+                                        amplifier_mode=amp_mode, overscan_range=32)
+            mmap_file[i] = flat
 
     # Calculate the median along the first axis
     master_frame = np.median(mmap_file, axis=0)
@@ -1414,8 +1467,8 @@ def get_master_mmap(obs_list, master_type, data_path, run, date, arm):
 
     return master_frame, header
 
-# def make_normalised_master_flat(master_filename, master_path, amplifier_mode):
-def get_normalised_master_flat(flat, hdr):
+# def make_normalised_master_flat(master_filename, master_path, arm, amplifier_mode):
+def normalise_flat(flat, hdr):
     """
     Create a normalized master flat field image.
     This function takes a flat field image and its header, smooths the flat field
@@ -1434,7 +1487,7 @@ def get_normalised_master_flat(flat, hdr):
     # with fits.open(os.path.join(master_path, master_filename)) as hdul:
     #     flat_image = hdul[0].data
     #     hdr = hdul[0].header
-    # flat_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(flat_image, hdr, overscan_range=32, amplifier_mode=amplifier_mode)
+    # flat_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(flat_image, hdr, arm=arm, amplifier_mode=amplifier_mode, overscan_range=32)
 
     y = np.arange(flat.shape[0])
     smoothed_flat = np.array([csaps(y, flat[:, col], y, smooth=0.5) for col in range(flat.shape[1])]).T    
@@ -1573,10 +1626,4 @@ def load_extracted_spectrum_fits(filename):
     return wave, flux, hdr
 
 if __name__ == '__main__':
-    filename = '24aug30010.fits' # use the flat because of visibility
-    spectrum_filename =  os.path.join(os.getcwd(), 'Data', filename)
-
-    image_data = fits.getdata(spectrum_filename)
-    # plt.imshow(image_data, cmap='gray', norm="log")
-    image_substracted_bias = remove_overscan_bias(image_data, overscan_range=32)
-    blured = median_filter(image_substracted_bias, (10,10))
+    pass

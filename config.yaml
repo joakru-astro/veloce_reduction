@@ -6,17 +6,15 @@ filename: 26aug20146.fits # name of the file to reduce, if 'reduce' is 'file'
 science_targets: targets.dat # file containing a list of science targets
 calib_type: SimLC # Wavelength calibration to use SimLC, SimThXe (not implemented), Interpolate_lc (LC not implemented), Interpolate_th (Th, not implemented), or Static
 # secondary information for the reduction
-arm: 'red' # Which arm to reduce 'all', 'red', 'green' or 'blue'
+arm: 'all' # Which arm to reduce 'all', 'red', 'green' or 'blue'
 amplifier_mode: 4 # 2 or 4
 sim_calib: True # Flag indicating if the simultaneous calibration was used True or False
-plot_diagnostic: False # True or False
+plot_diagnostic: True # True or False
 scattered_light: False # try to remove scattered light (background) True or False
 flat_field: False # these are fiber flats (white light fiber spectrum) used for pixel sensitivity True or False
 
 # part responsible for the paths
-# raw_parent_dir: /Path/to/Veloce/Data/Raw # path to the directory with raw data (one in which the run directory is, i.e. input directory)
 input_dir: Data/Raw/CSV_Run # path to the directory with raw data (one in which the run directory is, i.e. input directory)
-# extracted_parent_dir: /Path/to/Veloce/Data/Extracted # path to the directory where extracted data will be stored (i.e. output directory)
 output_dir: Data/Extracted/CSV_Run # path to the directory where extracted data will be stored (i.e. output directory)
 
 # below are paths where code will stor intermediet files and diagnostics
@@ -25,14 +23,11 @@ output_dir: Data/Extracted/CSV_Run # path to the directory where extracted data 
 master_dir: Default # directory for master images for night/run
 wavelength_calibration_dir: Default # directory for wavelength calibration related files for the night/run
 trace_shift_dir: Default # TODO: add to the code
-# obs_list_dir: Default
 plot_dir: Default # directory for diagnostic plots
-# log_dir: Default
 
 # below are paths where the code will look for internal files
 # leave as default unless you know what you are doing
 # veloce_reduction_dir: Default
 trace_dir: Default # path to the directory with traces to be extracted
 trace_file: Default # filename of the file with traces to be extracted
-# trace_file: "veloce_red_2amp_sim_calib_trace_2025-04-04.pkl"
 wave_dir: Default # path to the directory with reference wavelength solution
