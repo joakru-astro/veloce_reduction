@@ -113,13 +113,13 @@ def load_log_info(log_path, science_targets, selected_arm, day):
                     if target.strip() == 'BiasFrame':
                         obs_list['bias'].append(file_name)
                     elif target.strip() == 'FlatField-Quartz':
-                        if float(exp_time) == 0.1:
+                        if float(exp_time) == 0.1 and int(arm) == 3:
                             obs_list['flat_red'].append(file_name)
-                        elif float(exp_time) == 1.0:
+                        elif float(exp_time) == 1.0 and int(arm) == 2:
                             obs_list['flat_green'].append(file_name)
-                        elif float(exp_time) == 10.0:
+                        elif float(exp_time) == 10.0 and int(arm) == 1:
                             obs_list['flat_blue'].append(file_name)
-                        elif float(exp_time) == 60.0:
+                        elif float(exp_time) == 60.0 and int(arm) == 1:
                             obs_list['flat_blue_long'].append(file_name)
                         else:
                             pass

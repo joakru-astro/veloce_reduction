@@ -18,10 +18,11 @@ class VelocePaths:
                 self.input_dir = input_dir
                 if run is not None:
                     if input_dir.split('/')[-1] != run:
-                        raise FileNotFoundError(f"A run {run} was selected but doesn't match input directory name: {os.path.join(os.getcwd(), input_dir)}")
+                        print(f"[Warning]: Input directory name {input_dir.split('/')[-1]} does not match run name {run}.")
+                        # raise FileNotFoundError(f"A run {run} was selected but doesn't match input directory name: {os.path.join(os.getcwd(), input_dir)}")
                 else:
                     run = input_dir.split('/')[-1]
-                    print(f"Warning: No run selected, using input directory name {run}.")
+                    print(f"[Warning]: No run selected, using input directory name {run}.")
         # if run in os.listdir(os.path.join(os.getcwd(), input_dir)):
         #     self.raw_parent_dir = os.path.join(os.getcwd(), input_dir)
         # elif input_dir.split('/')[-1] == run:
@@ -40,7 +41,7 @@ class VelocePaths:
                 if output_dir.split('/')[-1] == run:
                     self.output_dir = output_dir
                 else:
-                    print(f"Warning: Output directory name: {output_dir},\n does not match run name: {run}")
+                    print(f"[Warning]: Output directory name: {output_dir},\n does not match run name: {run}")
                     # print("Creating output subdirectory with run name.")
                     # self.output_dir = os.path.join(output_dir, run)
                     self.output_dir = output_dir

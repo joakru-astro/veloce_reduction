@@ -62,31 +62,19 @@ def remove_scattered_light(frame, hdr, traces, diagnostic=False):
     return corrected_frame, hdr
 
 def get_flat(veloce_paths, arm, amplifier_mode, date, obs_list):
-    norm_flat_filename = os.path.join(veloce_paths.master_dir, f'master_flat_{arm}_{date}_norm.fits')
-    if os.path.exists(norm_flat_filename):
-        with fits.open(norm_flat_filename) as hdul:
-            flat = hdul[0].data
+    master_flat_filename = os.path.join(veloce_paths.master_dir, f'master_flat_{arm}_{date}.fits')
+    if os.path.exists(master_flat_filename):
+        with fits.open(master_flat_filename) as hdul:
+            master_flat = hdul[0].data
             hdr = hdul[0].header
     else:
-        master_flat_filename = os.path.join(veloce_paths.master_dir, f'master_flat_{arm}_{date}.fits')
-        if os.path.exists(master_flat_filename):
-            with fits.open(master_flat_filename) as hdul:
-                master_flat = hdul[0].data
-                hdr = hdul[0].header
-            ### TODO: swicht all flats to have removed overscan?
-            master_flat = veloce_reduction_tools.remove_overscan_bias(
-                master_flat, hdr, overscan_range=32, amplifier_mode=amplifier_mode)
-        else:
-            master_flat, hdr = veloce_reduction_tools.get_master_mmap(
-                obs_list, f"flat_{arm}", veloce_paths.input_dir,
-                date, arm)
-            veloce_reduction_tools.save_image_fits(master_flat_filename, master_flat, hdr)
-            master_flat = veloce_reduction_tools.remove_overscan_bias(
-                master_flat, hdr, overscan_range=32, amplifier_mode=amplifier_mode)
-        flat, hdr = veloce_reduction_tools.get_normalised_master_flat(master_flat, hdr)
-        veloce_reduction_tools.save_image_fits(norm_flat_filename, flat, hdr)
+        master_flat, hdr = veloce_reduction_tools.get_master_mmap(
+            obs_list, f"flat_{arm}", veloce_paths.input_dir,
+            date, arm, amplifier_mode)
+        master_flat, hdr = veloce_reduction_tools.normalise_flat(master_flat, hdr)
+        veloce_reduction_tools.save_image_fits(master_flat_filename, master_flat, hdr)
 
-    return flat
+    return master_flat
 
 def extract_run(target_list, config, veloce_paths, obs_list):
     """
@@ -133,15 +121,15 @@ def extract_run(target_list, config, veloce_paths, obs_list):
         ccd = data_dirs[arm]
         ### load traces
         traces = load_trace_data(arm, veloce_paths.trace_dir, sim_calib=config['sim_calib'], filename=config['trace_file'])
-
-        ### load wave calibration based on ThAr
-        ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
-            veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_calib_slice=traces.wave_calib_slice,
-                                                    wave_path=veloce_paths.wave_dir)
+        
         if config['calib_type'] == 'Static':
+            ### load static wave calibration based on ThAr
+            ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
+                veloce_reduction_tools.load_prefitted_wave(
+                    arm=arm, wave_calib_slice=traces.wave_calib_slice, wave_path=veloce_paths.wave_dir)
             static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
-        elif config['calib_type'] == 'Interpolate':
-            wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation(target_list, obs_list, veloce_paths)
+        # elif config['calib_type'] == 'Interpolate':
+        #     wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation(target_list, obs_list, veloce_paths)
         else:
             pass #load LC reference
 
@@ -160,7 +148,7 @@ def extract_run(target_list, config, veloce_paths, obs_list):
                         hdr = hdul[0].header
 
                         image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
-                            image_data, hdr, overscan_range=32, amplifier_mode=config['amplifier_mode'])
+                            image_data, hdr, arm, config['amplifier_mode'], overscan_range=32)
                         
                         if config['flat_field']:
                             image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, flat, hdr)
@@ -174,13 +162,13 @@ def extract_run(target_list, config, veloce_paths, obs_list):
                         if config['calib_type'] == 'Static':
                             vacuum_wave = static_wave
                             final_flux = extracted_science_orders
-                        elif config['calib_type'] == 'Interpolate':
-                            vacuum_wave, final_flux = veloce_wavecalib.interpolate_wave(
-                                extracted_science_orders, hdr)
-                        elif config['calib_type'] == 'SimThXe':
-                            vacuum_wave = veloce_wavecalib.calibrate_simTh(
-                                extracted_science_orders, hdr)
-                            final_flux = extracted_science_orders
+                        # elif config['calib_type'] == 'Interpolate':
+                        #     vacuum_wave, final_flux = veloce_wavecalib.interpolate_wave(
+                        #         extracted_science_orders, hdr)
+                        # elif config['calib_type'] == 'SimThXe':
+                        #     vacuum_wave = veloce_wavecalib.calibrate_simTh(
+                        #         extracted_science_orders, hdr)
+                        #     final_flux = extracted_science_orders
                         elif config['calib_type'] == 'SimLC':
                             vacuum_wave, final_flux = veloce_wavecalib.calibrate_simLC(
                                 extracted_science_orders, veloce_paths, image_subtracted_bias,
@@ -213,7 +201,7 @@ def extract_night(target_list, config, veloce_paths, obs_list):
     This function processes observation data for a specific night and spectrograph arm from Veloce.
     It loads wave calibration data, trace data, and modifies summing ranges based on the specified arm.
     The function is designed to work with 'green' and 'red' arms, with a note to add support for the 'blue' arm in the future.
-
+                                                     
     Parameters:
     - obs_list_filename (str): The filename of the observation list to be processed.
     - run (str): The specific run identifier for which the data is to be extracted.
@@ -251,14 +239,14 @@ def extract_night(target_list, config, veloce_paths, obs_list):
         ### load traces
         traces = load_trace_data(arm, veloce_paths.trace_dir, sim_calib=config['sim_calib'], filename=config['trace_file'])
 
-        # load wave calibration based on ThAr
-        ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
-            veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_calib_slice=traces.wave_calib_slice,
-                                                        wave_path=veloce_paths.wave_dir)
         if config['calib_type'] == 'Static':
+            # load wave calibration based on ThAr
+            ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
+                veloce_reduction_tools.load_prefitted_wave(
+                    arm=arm, wave_calib_slice=traces.wave_calib_slice, wave_path=veloce_paths.wave_dir)
             static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
-        elif config['calib_type'] == 'Interpolate':
-            wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation()
+        # elif config['calib_type'] == 'Interpolate':
+        #     wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation()
         else:
             pass
 
@@ -277,7 +265,7 @@ def extract_night(target_list, config, veloce_paths, obs_list):
                     hdr = hdul[0].header
                     # times.append(hdr['MJD-OBS'])
                     image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
-                        image_data, hdr, overscan_range=32, amplifier_mode=config['amplifier_mode'])
+                            image_data, hdr, arm, config['amplifier_mode'], overscan_range=32)
                     
                     if config['flat_field']:
                         image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, flat, hdr)
@@ -291,12 +279,12 @@ def extract_night(target_list, config, veloce_paths, obs_list):
                     if config['calib_type'] == 'Static':
                         vacuum_wave = static_wave
                         final_flux = extracted_science_orders
-                    elif config['calib_type'] == 'Interpolate':
-                        vacuum_wave = veloce_wavecalib.interpolate_wave(extracted_science_orders, hdr)                    
-                        final_flux = extracted_science_orders
-                    elif config['calib_type'] == 'SimThXe':
-                        vacuum_wave = veloce_wavecalib.calibrate_simTh(extracted_science_orders, hdr)                    
-                        final_flux = extracted_science_orders
+                    # elif config['calib_type'] == 'Interpolate':
+                    #     vacuum_wave = veloce_wavecalib.interpolate_wave(extracted_science_orders, hdr)                    
+                    #     final_flux = extracted_science_orders
+                    # elif config['calib_type'] == 'SimThXe':
+                    #     vacuum_wave = veloce_wavecalib.calibrate_simTh(extracted_science_orders, hdr)                    
+                    #     final_flux = extracted_science_orders
                     elif config['calib_type'] == 'SimLC':
                             vacuum_wave, final_flux = veloce_wavecalib.calibrate_simLC(
                                 extracted_science_orders, veloce_paths, image_subtracted_bias,
@@ -346,15 +334,14 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
         #     # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
         #     filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
         #     traces = veloce_reduction_tools.Traces.load_traces(filename)
-
-        # load wave calibration based on ThAr
-        ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
-            veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_calib_slice=traces.wave_calib_slice,
-                                                        wave_path=veloce_paths.wave_dir)
+        
         if config['calib_type'] == 'Static':
+            # load static wave calibration based on ThAr
+            ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = veloce_reduction_tools.load_prefitted_wave(
+                arm=arm, wave_calib_slice=traces.wave_calib_slice, wave_path=veloce_paths.wave_dir)
             static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
-        elif config['calib_type'] == 'Interpolate':
-            wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation()
+        # elif config['calib_type'] == 'Interpolate':
+        #     wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation()
         else:
             pass
 
@@ -368,7 +355,7 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
                 hdr = hdul[0].header
                 # times.append(hdr['MJD-OBS'])
                 image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
-                    image_data, hdr, overscan_range=32, amplifier_mode=config['amplifier_mode'])
+                            image_data, hdr, arm, config['amplifier_mode'], overscan_range=32)
                 
                 if config['flat_field']:
                     flat = get_flat(config, veloce_paths, arm, config['amplifier_mode'], config['date'], obs_list)
@@ -383,12 +370,12 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
                 if config['calib_type'] == 'Static':
                     vacuum_wave = static_wave                    
                     final_flux = extracted_science_orders
-                elif config['calib_type'] == 'Interpolate':
-                    vacuum_wave = veloce_wavecalib.interpolate_wave(extracted_science_orders, hdr)                    
-                    final_flux = extracted_science_orders
-                elif config['calib_type'] == 'SimThXe':
-                    vacuum_wave = veloce_wavecalib.calibrate_simTh(extracted_science_orders, hdr)                    
-                    final_flux = extracted_science_orders
+                # elif config['calib_type'] == 'Interpolate':
+                #     vacuum_wave = veloce_wavecalib.interpolate_wave(extracted_science_orders, hdr)                    
+                #     final_flux = extracted_science_orders
+                # elif config['calib_type'] == 'SimThXe':
+                #     vacuum_wave = veloce_wavecalib.calibrate_simTh(extracted_science_orders, hdr)                    
+                #     final_flux = extracted_science_orders
                 elif config['calib_type'] == 'SimLC':
                     vacuum_wave, final_flux = veloce_wavecalib.calibrate_simLC(
                                 extracted_science_orders, veloce_paths, image_subtracted_bias,
