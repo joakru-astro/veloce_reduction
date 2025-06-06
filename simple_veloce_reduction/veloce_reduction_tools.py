@@ -1368,48 +1368,6 @@ def air_to_vacuum(wave):
     n = 1 + 0.00008336624212083 + 0.02408926869968 / (130.1065924522 - s) + 0.0001599740894897 / (38.92568793293 - s)
     return (wave*10 / n)/10
 
-# def get_master(obs_list, master_type, data_path, run, date, arm):
-#     """
-#     Generates a master frame by median combining individual frames for a given observation type and date.
-
-#     This function reads FITS files specified in an observation list for a particular observation type and date,
-#     combines these frames by stacking them along a new axis, and then calculates the median of these frames to
-#     produce a master frame. The function is designed to work with astronomical data, specifically for the Veloce
-#     spectrograph which has different CCDs (charge-coupled devices) for red, green, and blue spectral arms.
-
-#     Parameters:
-#     - obs_list (dict): A nested dictionary where the first key is the master type (e.g., 'bias', 'flat'), the
-#       second key is the date, and the value is a list of file names for that observation type and date.
-#     - master_type (str): The type of master frame to generate (e.g., 'bias', 'flat').
-#     - data_path (str): The base path to the directory containing the observation data.
-#     - run (str): The observing run identifier, used to further specify the location of the data.
-#     - date (str): The date of the observation, used to select the correct set of files from the observation list.
-#     - arm (str): The spectral arm ('red', 'green', 'blue') of the data to process, which determines the CCD to use.
-
-#     Returns:
-#     - numpy.ndarray: A 2D numpy array representing the median-combined master frame for the specified observation
-#       type, date, and spectral arm.
-
-#     Raises:
-#     - KeyError: If the specified `arm` is not one of 'red', 'green', or 'blue'.
-#     - FileNotFoundError: If any of the FITS files specified in the observation list cannot be found at the
-#       constructed file path.
-#     """
-#     data_sub_dirs = {'red': 'ccd_3', 'green': 'ccd_2', 'blue': 'ccd_1'}
-#     if obs_list[master_type][date] != []:
-#         for file_name in obs_list[master_type][date]:
-#             fits_image_filename = os.path.join(data_path, run, date, data_sub_dirs[arm], file_name)
-#             with fits.open(fits_image_filename) as hdul:
-#                 try:
-#                     frames = np.dstack((frames, hdul[0].data))
-#                 except:
-#                     frames = np.array(hdul[0].data)
-#                     # Load placeholder header from the first file 
-#                     # TODO: edit header to reflect that it is a median combined frame
-#                     header = hdul[0].header
-
-#     return np.median(frames, axis=2), header
-
 def get_master_mmap(obs_list, master_type, data_path, date, arm, amp_mode):
     """
     Generates a master frame by median combining individual frames for a given observation type and date using memory-mapped files.

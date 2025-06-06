@@ -20,10 +20,6 @@ def format_date(date_str):
     return formatted_date
 
 def load_run_logs(science_targets, arm, veloce_paths):
-    # if veloce_paths is None:
-    #     veloce_paths = veloce_config.VelocePaths(run)
-    #     veloce_paths.__post_init__()
-
     # Define the regular expression pattern for YYMMDD format
     date_pattern = re.compile(r'^\d{6}$')
 
@@ -49,18 +45,8 @@ def load_run_logs(science_targets, arm, veloce_paths):
     return obs_list
 
 def load_night_logs(date, science_targets, arm, veloce_paths):
-    # if veloce_paths is None:
-    #     veloce_paths = veloce_config.VelocePaths(run)
-    #     veloce_paths.__post_init__()
-
-    # Define the regular expression pattern for YYMMDD format
-    date_pattern = re.compile(r'^\d{6}$')
-
     day = format_date(date)
 
-    # obs_list = {'flat_red': [], 'flat_green': [], 'flat_blue': [], 'flat_blue_long': [],
-    #             'ARC-ThAr': [], 'SimThLong': [], 'SimTh': [], 'SimLC': [],
-    #             'dark': [], 'bias': [], 'science': []}
     obs_list = {'flat_red': {}, 'flat_green': {}, 'flat_blue': {}, 'flat_blue_long': {},
                 'ARC-ThAr': {}, 'SimThLong': {}, 'SimTh': {}, 'SimLC': {},
                 'dark': {}, 'bias': {}, 'science': {}}
@@ -98,7 +84,6 @@ def load_log_info(log_path, science_targets, selected_arm, day):
     - The function categorizes flat fields based on their exposure times (0.1s for 'flat_red', 1.0s for 'flat_green',
       and 10.0s for 'flat_blue').
     """
-    # obs_list = {'flat': [], 'dark': [], 'bias': [], 'science': [], 'wave_calib': []}
     obs_list = {'flat_red': [], 'flat_green': [], 'flat_blue': [], 'flat_blue_long': [],
                 'ARC-ThAr': [], 'SimThLong': [], 'SimTh': [], 'SimLC': [],
                 'dark': [], 'bias': [], 'science': []}
@@ -142,49 +127,49 @@ def load_log_info(log_path, science_targets, selected_arm, day):
     return obs_list
 
 ### Probably saving info about all files (csience, calib ect.) from the logs is better then this cutout
-### TODO: change what is saved and how target list is passed to the function
-def save_science_target_list(summary, run=None, target=None, list_name=None, obs_list_path=None):
-    """
-    Saves a filtered list of science targets to a pickle file.
+### TODO: change what is saved and how target list is passed to the function or remove it?
+# def save_science_target_list(summary, run=None, target=None, list_name=None, obs_list_path=None):
+#     """
+#     Saves a filtered list of science targets to a pickle file.
 
-    This function filters a summary dictionary of observations based on a specified run or target and saves
-    the filtered list to a pickle file. The file is saved in a predefined directory.
+#     This function filters a summary dictionary of observations based on a specified run or target and saves
+#     the filtered list to a pickle file. The file is saved in a predefined directory.
 
-    Parameters:
-    - summary (dict): A dictionary with observation types as keys and lists of observations as values.
-    - run (str, optional): The run identifier to filter the observations. If provided, the list will be filtered
-      based on the run.
-    - target (str, optional): The target name to filter the observations. If provided, the list will be filtered
-      based on the target.
-    - list_name (str, optional): The name to use for the saved list file. If None, the run or target name will be used.
+#     Parameters:
+#     - summary (dict): A dictionary with observation types as keys and lists of observations as values.
+#     - run (str, optional): The run identifier to filter the observations. If provided, the list will be filtered
+#       based on the run.
+#     - target (str, optional): The target name to filter the observations. If provided, the list will be filtered
+#       based on the target.
+#     - list_name (str, optional): The name to use for the saved list file. If None, the run or target name will be used.
 
-    Returns:
-    - str: The filename of the saved pickle file.
+#     Returns:
+#     - str: The filename of the saved pickle file.
 
-    Raises:
-    - ValueError: If neither `run` nor `target` is provided.
+#     Raises:
+#     - ValueError: If neither `run` nor `target` is provided.
 
-    Note:
-    - The function assumes a standard directory structure for storing observation lists.
-    - The function uses the `pickle` module to save the filtered list to a file.
-    """
-    if obs_list_path is None:
-        veloce_paths = veloce_config.VelocePaths(run)
-        obs_list_path = veloce_paths.obs_list_dir
+#     Note:
+#     - The function assumes a standard directory structure for storing observation lists.
+#     - The function uses the `pickle` module to save the filtered list to a file.
+#     """
+#     if obs_list_path is None:
+#         veloce_paths = veloce_config.VelocePaths(run)
+#         obs_list_path = veloce_paths.obs_list_dir
     
-    if target is not None:
-        if list_name is None: list_name = target
-        summary_final = {k:[obs for obs in v if obs[0]==target] for k,v in summary.items() if v}
-    elif run is not None:
-        if list_name is None: list_name = run
-        summary_final = {k:v for k,v in summary.items() if v}
-    else:
-        raise ValueError("No run or target provided.")
+#     if target is not None:
+#         if list_name is None: list_name = target
+#         summary_final = {k:[obs for obs in v if obs[0]==target] for k,v in summary.items() if v}
+#     elif run is not None:
+#         if list_name is None: list_name = run
+#         summary_final = {k:v for k,v in summary.items() if v}
+#     else:
+#         raise ValueError("No run or target provided.")
 
-    with open(os.path.join(obs_list_path, f'obs_list_{list_name}.pkl'), 'wb') as f:
-        pickle.dump(summary_final, f)
+#     with open(os.path.join(obs_list_path, f'obs_list_{list_name}.pkl'), 'wb') as f:
+#         pickle.dump(summary_final, f)
     
-    return f'science_obs_list_{list_name}.pkl'
+#     return f'science_obs_list_{list_name}.pkl'
 
 
 def get_obs_list(summary, target=None):

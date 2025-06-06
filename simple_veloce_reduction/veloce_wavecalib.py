@@ -9,7 +9,7 @@ from scipy.linalg import lstsq
 from scipy import signal
 # from csaps import csaps
 
-from . import veloce_reduction_tools
+from . import veloce_reduction_tools, veloce_diagnostic
 
 arm_nums = {'red': 3, 'green': 2, 'blue': 1}
 REPETITION_RATE = 25e9  # Hz
@@ -133,39 +133,7 @@ def fit_lc_peak(pix_shift, ccf):
 
     return popt[1], popt
 
-def plot_ccf(PIX, CCF, order, chunk):
-    fitting_limit = np.ceil(np.mean(np.diff(signal.find_peaks(CCF[order-1][chunk])[0])))/2 + 1
-    plt.figure(figsize=(10, 6))
-    plt.title('Cross-Correlation Function')
-    plt.plot(PIX[order-1][chunk], CCF[order-1][chunk], label=f'Order {order}')
-    shift, popt = fit_lc_peak(PIX[order-1][chunk], CCF[order-1][chunk])
-    print(f"Amplitude: {popt[0]}\n Shift: {popt[1]}\n Sigma: {popt[2]}\n Beta: {popt[3]}\n Baseline: {popt[4]}")
-    subpixel = np.arange(np.min(PIX[order-1][chunk]), np.max(PIX[order-1][chunk]), 0.01)
-    plt.plot(subpixel, general_gaussian(subpixel, *popt), label='Gaussian Fit', linestyle='--')
-    plt.axvline(shift, color='r', linestyle='--', label='Peak Position')
-    plt.title(f'Cross-Correlation Function for Order {order}, Shift = {popt[1]:.2f}')
-    plt.xlabel('Pixel Shift')
-    plt.ylabel('Cross-Correlation')
-    plt.xlim(-1*fitting_limit, fitting_limit)
-    plt.legend()
-    plt.grid()
-    plt.show()
-
-def plot_offset_map(dispersion_position, orders_position, offset_array):
-    """
-    Plot the offset map in 3D.
-    """    
-    fig = plt.figure(figsize=(8, 8))
-    ax = fig.add_subplot(111, projection='3d')
-    points = ax.scatter(dispersion_position.flatten(), orders_position.flatten(), offset_array.flatten(), c=offset_array.flatten(), cmap='viridis', marker='o')
-    ax.set_title('Offset Map')
-    ax.set_xlabel('Dispersion Position')
-    ax.set_ylabel('Orders')
-    ax.set_zlabel('Offset')
-    fig.colorbar(points, shrink=0.5, aspect=10)
-    plt.show()
-
-def calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_pixel, number_of_parts=8, plot=False):
+def calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_pixel, number_of_parts=8, plot=False, veloce_paths=None, filename=None):
     """
     Calculate the cross-correlation function (CCF) for each order of the laser comb.
     """
@@ -200,8 +168,10 @@ def calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_
     offset_array = np.array([[fit_lc_peak(pixel_shifts[i][j], CCF[i][j])[0] for j in range(number_of_parts)] for i in range(len(ref_orders))])
     
     if plot:
-        plot_ccf(pixel_shifts, CCF, 15, 4)
-        plot_offset_map(dispersion_position, orders_position, offset_array)
+        veloce_diagnostic.plot_ccf(pixel_shifts, CCF, 15, 4, fit_lc_peak, general_gaussian,
+                                   veloce_paths=veloce_paths, filename=filename)
+        veloce_diagnostic.plot_offset_map(dispersion_position, orders_position, offset_array,
+                                          veloce_paths=veloce_paths, filename=filename)
 
     return dispersion_position, orders_position, offset_array
 
@@ -227,25 +197,7 @@ def calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_
 #         fig.colorbar(points, shrink=0.5, aspect=10)
 #     return dispersion_position, orders_position, offset_array
 
-def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points):
-    """
-    Plot the offset map in 3D.
-    """
-    fig = plt.figure(figsize=(8, 8))
-    ax = fig.add_subplot(111, projection='3d')
-    max_pixel = max([np.nanmax(order) for order in extracted_pixels])+1
-    min_pixel = min([np.nanmin(order) for order in extracted_pixels])
-    X, Y = np.meshgrid(np.arange(min_pixel, max_pixel, 1), ref_orders)
-    surf = ax.plot_surface(X, Y, surface_points, vmin=np.min(filtered_points[:,2]), vmax=np.max(filtered_points[:,2]), cmap='viridis', edgecolor='none', alpha=0.5)
-    points = ax.scatter(filtered_points[:,0], filtered_points[:,1], filtered_points[:,2], c=filtered_points[:,2], cmap='viridis', marker='o')
-    ax.set_title('Offset Map')
-    ax.set_xlabel('Dispersion Position')
-    ax.set_ylabel('Orders')
-    ax.set_zlabel('Offset')
-    fig.colorbar(points, shrink=0.5, aspect=10)
-    plt.show()
-
-def fit_surface(dispersion_position, orders_position, offset_array, extracted_pixels, degree=1, plot=False):
+def fit_surface(dispersion_position, orders_position, offset_array, extracted_pixels, degree=1, plot=False, veloce_paths=None, filename=None):
     """
     Fit a surface to the offset map using least squares.
 
@@ -304,7 +256,8 @@ def fit_surface(dispersion_position, orders_position, offset_array, extracted_pi
     Z = np.array(z).reshape(extracted_pixels.shape)
 
     if plot:
-        plot_surface(np.unique(orders_position), extracted_pixels, Z, data[mask])
+        veloce_diagnostic.plot_surface(np.unique(orders_position), extracted_pixels, Z, data[mask],
+                                       veloce_paths=veloce_paths, filename=filename)
 
     return Z, C, data[mask], residuals[mask]
 
@@ -351,10 +304,11 @@ def apply_wavelength_shift(wave, arm, veloce_paths):
         wave[i] *= convert
     return wave
 
-def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, plot=False):
+def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, plot=False, filename=None):
     if arm == 'blue':
-        print("[warning] Blue arm is not supported for LC calibration.")
-        return np.array([None]), np.array([None])
+        raise NotImplementedError("Blue arm is not supported for LC calibration.")
+        # print("[warning] Blue arm is not supported for LC calibration.")
+        # return np.array([None]), np.array([None])
     ref_orders, ref_wave, ref_intensity, ref_pixel = load_LC_wave_reference(veloce_paths, arm)
     lc_intensity, lc_pixel, order_slice, pixel_slices = load_simultanous_LC(lc_image, veloce_paths, hdr, arm, ref_orders=ref_orders, ref_pixel=ref_pixel)
     # align extracted orders with calibrated orders and pixel ranges
@@ -363,12 +317,14 @@ def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, 
     extracted_science_orders = pad_array(extracted_science_orders, ref_pixel)
 
     # cross-correlate the observed LC pixel positions with the reference LC pixel positions
-    dispersion_position, orders_position, offset_array = calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_pixel, plot=plot)
+    dispersion_position, orders_position, offset_array = calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_pixel,
+                                                                              plot=plot, veloce_paths=veloce_paths, filename=filename)
     
     # fit a surface to the offset map
     results = []
     for degree in range(1, 4):
-        fit_result = fit_surface(dispersion_position, orders_position, offset_array, lc_pixel, degree=degree)
+        fit_result = fit_surface(dispersion_position, orders_position, offset_array, lc_pixel, degree=degree,
+                                 plot=plot, veloce_paths=veloce_paths, filename=filename)
         results.append(fit_result)
 
     # Select the result with the smallest standard deviation of residuals

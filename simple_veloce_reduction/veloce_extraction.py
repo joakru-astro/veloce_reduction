@@ -78,22 +78,17 @@ def get_flat(veloce_paths, arm, amplifier_mode, date, obs_list):
 
 def extract_run(target_list, config, veloce_paths, obs_list):
     """
-    Extracts spectral data from Veloce observations without applying blaze correction.
+    Extracts spectral data from Veloce observations for a specific run without applying blaze correction.
     
     This function processes observation data for a specific run and spectrograph arm from Veloce.
     It loads wave calibration data, trace data, and modifies summing ranges based on the
-    specified arm. The function is designed to work with 'green' and 'red' arms, with a note to add
-    support for the 'blue' arm in the future.
+    specified arm. The function is designed to work with 'green', 'red', and 'blue' arms.
 
     Parameters:
-    - obs_list_filename (str): The filename of the observation list to be processed.
-    - run (str): The specific run identifier for which the data is to be extracted.
-    - arm (str): The spectrograph arm to be processed.
-    - amp_mode (int): The amplifier mode used for the observations.
-    - sim_calib (bool, optional): A flag to indicate if observations were performed with simultaneous calibration.
-    - remove_background (bool, optional): A flag to indicate if background subtraction is to be performed.
-    - veloce_paths (VelocePaths, optional): An object containing paths to Veloce data directories.
-    - output_path (str, optional): The path to save the extracted data. If None, a default path is used. [deprecated]
+    - target_list (dict): A dictionary containing observation targets grouped by date.
+    - config (dict): Configuration settings for the extraction process, including arm, amplifier mode, calibration type, etc.
+    - veloce_paths (VelocePaths): An object containing paths to Veloce data directories.
+    - obs_list (list): A list of observation metadata for the run.
 
     Raises:
     - ValueError: If an unsupported arm is specified.
@@ -142,7 +137,6 @@ def extract_run(target_list, config, veloce_paths, obs_list):
                 if int(filename[5]) == arm_nums[arm]:
                     print(target, filename)
                     spectrum_filename =  os.path.join(veloce_paths.input_dir, date, ccd, filename)
-                    # spectrum_filename =  os.path.join(veloce_paths.input_dir, config['run'], date, ccd, filename)
                     with fits.open(spectrum_filename) as hdul:
                         image_data = hdul[0].data
                         hdr = hdul[0].header
@@ -172,7 +166,7 @@ def extract_run(target_list, config, veloce_paths, obs_list):
                         elif config['calib_type'] == 'SimLC':
                             vacuum_wave, final_flux = veloce_wavecalib.calibrate_simLC(
                                 extracted_science_orders, veloce_paths, image_subtracted_bias,
-                                hdr, arm, plot=config['plot_diagnostic'])
+                                hdr, arm, plot=config['plot_diagnostic'], filename=filename)
                         
                         final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
                         
@@ -203,14 +197,10 @@ def extract_night(target_list, config, veloce_paths, obs_list):
     The function is designed to work with 'green' and 'red' arms, with a note to add support for the 'blue' arm in the future.
                                                      
     Parameters:
-    - obs_list_filename (str): The filename of the observation list to be processed.
-    - run (str): The specific run identifier for which the data is to be extracted.
-    - arm (str): The spectrograph arm to be processed.
-    - amp_mode (int): The amplifier mode used for the observations.
-    - sim_calib (bool, optional): A flag to indicate if observations were performed with simultaneous calibration.
-    - remove_background (bool, optional): A flag to indicate if background subtraction is to be performed.
-    - veloce_paths (VelocePaths, optional): An object containing paths to Veloce data directories.
-    - output_path (str, optional): The path to save the extracted data. If None, a default path is used. [deprecated]
+    - target_list (dict): A dictionary containing observation targets grouped by date.
+    - config (dict): Configuration settings for the extraction process, including arm, amplifier mode, calibration type, etc.
+    - veloce_paths (VelocePaths): An object containing paths to Veloce data directories.
+    - obs_list (list): A list of observation metadata for the night.
 
     Raises:
     - ValueError: If an unsupported arm is specified.
@@ -259,7 +249,6 @@ def extract_night(target_list, config, veloce_paths, obs_list):
             if int(filename[5]) == arm_nums[arm]:
                 print(target, filename)
                 spectrum_filename =  os.path.join(veloce_paths.input_dir, date, ccd, filename)
-                # spectrum_filename =  os.path.join(veloce_paths.input_dir, config['run'], date, ccd, filename)
                 with fits.open(spectrum_filename) as hdul:
                     image_data = hdul[0].data
                     hdr = hdul[0].header
@@ -288,7 +277,7 @@ def extract_night(target_list, config, veloce_paths, obs_list):
                     elif config['calib_type'] == 'SimLC':
                             vacuum_wave, final_flux = veloce_wavecalib.calibrate_simLC(
                                 extracted_science_orders, veloce_paths, image_subtracted_bias,
-                                hdr, arm, plot=config['plot_diagnostic'])
+                                hdr, arm, plot=config['plot_diagnostic'], filename=filename)
                         
                     final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
 
@@ -311,6 +300,24 @@ def extract_night(target_list, config, veloce_paths, obs_list):
                         filename=fits_filename, wave=final_wave, flux=final_flux, hdr=hdr)
 
 def extract_single_file(filename, config, veloce_paths, obs_list):
+    """
+    Extracts the spectrum from a single file for a specified arm of the Veloce spectrograph.
+    This function processes a single file by loading trace data, applying calibrations, 
+    removing overscan bias, performing flat-field correction, removing scattered light, 
+    and extracting spectral orders. The extracted spectrum is saved as a FITS file.
+    
+    Parameters:
+        - filename (str): Name of the file to be processed.
+        - config (dict): Configuration settings for the extraction process, including arm, amplifier mode, calibration type, etc.
+        - veloce_paths (VelocePaths): An object containing paths to Veloce data directories.
+        - obs_list (list): List of observation metadata.
+    
+    Raises:
+        - ValueError: If an unsupported arm is specified or if 'all' is used for single file extraction.
+    
+    Returns:
+        - None: The extracted spectrum is saved as a FITS file in the specified output directory.
+    """
     # pick which arm to reduce
     if config['arm'] in data_dirs.keys():
         arms = [config['arm']]
@@ -379,7 +386,7 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
                 elif config['calib_type'] == 'SimLC':
                     vacuum_wave, final_flux = veloce_wavecalib.calibrate_simLC(
                                 extracted_science_orders, veloce_paths, image_subtracted_bias,
-                                hdr, arm, plot=config['plot_diagnostic'])
+                                hdr, arm, plot=config['plot_diagnostic'], filename=filename)
                 final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
 
                 if config['plot_diagnostic']:

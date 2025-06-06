@@ -3,6 +3,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+from scipy.signal import find_peaks
+
 from . import veloce_reduction_tools
 
 def plot_order_cross_section(frame, traces, order, filename, veloce_paths, plot_type='median', margin=[10,10]):
@@ -88,11 +90,11 @@ def plot_order_cross_section(frame, traces, order, filename, veloce_paths, plot_
     if isinstance(plot_type, int):
         plt.title(f"Order {order}, row {plot_type}")
         output_file = os.path.join(veloce_paths.plot_dir,
-                               f'Cross_section_order_{order}_row_{plot_type}_{filename}.png')
+                               f'Cross_section_order_{order}_row_{plot_type}_{filename.split('.')[0]}.png')
     else:
         plt.title(f"Order {order}, {plot_type}")
         output_file = os.path.join(veloce_paths.plot_dir,
-                               f'Cross_section_order_{order}_{plot_type}_{filename}.png')
+                               f'Cross_section_order_{order}_{plot_type}_{filename.split('.')[0]}.png')
     plt.xlabel("Pixel")
     plt.ylabel("Counts")
     
@@ -142,7 +144,7 @@ def plot_extracted_2D_order(extracted_order_imgs, order, traces, filename, veloc
         ax.set_ylabel("Row")
 
     output_file = os.path.join(veloce_paths.plot_dir,
-                               f'Extracted_order_{order}_{filename}.png')
+                               f'Extracted_order_{order}_{filename.split('.')[0]}.png')
 
     plt.savefig(output_file)
     plt.close()
@@ -172,7 +174,69 @@ def plot_scattered_light(frame, background, corrected_frame, veloce_paths, filen
     # fig.colorbar(ax, ax=fig.get_axes())
     plt.tight_layout()
     output_file = os.path.join(veloce_paths.plot_dir,
-                               f'Fitted_scattered_light_{filename}.png')
+                               f'Fitted_scattered_light_{filename.split('.')[0]}.png')
     plt.savefig(output_file)
 
     return background_message, output_file
+
+def plot_ccf(PIX, CCF, order, chunk, fit_lc_peak, general_gaussian, veloce_paths=None, filename=None):
+    fitting_limit = np.ceil(np.mean(np.diff(find_peaks(CCF[order-1][chunk])[0])))/2 + 1
+    plt.figure(figsize=(10, 6))
+    plt.title('Cross-Correlation Function')
+    plt.plot(PIX[order-1][chunk], CCF[order-1][chunk], label=f'Order {order}')
+    shift, popt = fit_lc_peak(PIX[order-1][chunk], CCF[order-1][chunk])
+    print(f"Amplitude: {popt[0]}\n Shift: {popt[1]}\n Sigma: {popt[2]}\n Beta: {popt[3]}\n Baseline: {popt[4]}")
+    subpixel = np.arange(np.min(PIX[order-1][chunk]), np.max(PIX[order-1][chunk]), 0.01)
+    plt.plot(subpixel, general_gaussian(subpixel, *popt), label='Gaussian Fit', linestyle='--')
+    plt.axvline(shift, color='r', linestyle='--', label='Peak Position')
+    plt.title(f'Cross-Correlation Function for Order {order}, Shift = {popt[1]:.2f}')
+    plt.xlabel('Pixel Shift')
+    plt.ylabel('Cross-Correlation')
+    plt.xlim(-1*fitting_limit, fitting_limit)
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+
+    output_file = os.path.join(veloce_paths.plot_dir,
+                               f'LC_peak_fit_order_{order}_{filename.split('.')[0]}.png')
+    plt.savefig(output_file)
+
+def plot_offset_map(dispersion_position, orders_position, offset_array, veloce_paths=None, filename=None):
+    """
+    Plot the offset map in 3D.
+    """    
+    fig = plt.figure(figsize=(8, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    points = ax.scatter(dispersion_position.flatten(), orders_position.flatten(), offset_array.flatten(), c=offset_array.flatten(), cmap='viridis', marker='o')
+    ax.set_title('Offset Map')
+    ax.set_xlabel('Dispersion Position')
+    ax.set_ylabel('Orders')
+    ax.set_zlabel('Offset')
+    fig.colorbar(points, shrink=0.5, aspect=10)
+    plt.tight_layout()
+
+    output_file = os.path.join(veloce_paths.plot_dir,
+                               f'LC_offset_map_{filename.split('.')[0]}.png')
+    plt.savefig(output_file)
+
+def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, veloce_paths=None, filename=None):
+    """
+    Plot the offset map in 3D.
+    """
+    fig = plt.figure(figsize=(8, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    max_pixel = max([np.nanmax(order) for order in extracted_pixels])+1
+    min_pixel = min([np.nanmin(order) for order in extracted_pixels])
+    X, Y = np.meshgrid(np.arange(min_pixel, max_pixel, 1), ref_orders)
+    surf = ax.plot_surface(X, Y, surface_points, vmin=np.min(filtered_points[:,2]), vmax=np.max(filtered_points[:,2]), cmap='viridis', edgecolor='none', alpha=0.5)
+    points = ax.scatter(filtered_points[:,0], filtered_points[:,1], filtered_points[:,2], c=filtered_points[:,2], cmap='viridis', marker='o')
+    ax.set_title('Offset Map')
+    ax.set_xlabel('Dispersion Position')
+    ax.set_ylabel('Orders')
+    ax.set_zlabel('Offset')
+    fig.colorbar(points, shrink=0.5, aspect=10)
+    plt.tight_layout()
+
+    output_file = os.path.join(veloce_paths.plot_dir,
+                               f'LC_fitted_surface_{filename.split('.')[0]}.png')
+    plt.savefig(output_file)
