@@ -1,10 +1,9 @@
 # primary information for the reduction
-reduce: run # what to reduce options: 'run', 'night', or 'file'
-run: CSV_Run # name of the run (directory name including observing nights - standard Veloce directory structure)
+reduce: run # what to reduce options: 'run', 'night', or 'file'; run will reduce all dates in provided directories.
 date: 230826 # date of the observation (YYMMDD), if 'reduce' is 'night' or 'file'
 filename: 26aug20146.fits # name of the file to reduce, if 'reduce' is 'file'
 science_targets: targets.dat # file containing a list of science targets
-calib_type: SimLC # Wavelength calibration to use SimLC, SimThXe (not implemented), Interpolate_lc (LC not implemented), Interpolate_th (Th, not implemented), or Static
+calib_type: SimLC # Wavelength calibration to use SimLC or Static, other possibilieties are not implemented: SimThXe, Interpolate_LC, Interpolate_Th
 # secondary information for the reduction
 arm: 'all' # Which arm to reduce 'all', 'red', 'green' or 'blue'
 amplifier_mode: 4 # 2 or 4
