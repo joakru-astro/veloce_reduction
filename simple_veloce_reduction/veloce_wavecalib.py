@@ -284,8 +284,8 @@ def estimate_calibration_precision(residuals, order, ref_wave):
     average_wave = np.nanmean(ref_wave[order-1])
     
     # Calculate the calibration precision
-    # calibration_precision = std_dev / np.sqrt(n_points) * average_step / average_wave * c
-    calibration_precision = std_dev * average_step / average_wave * c.value
+    calibration_precision = std_dev / np.sqrt(n_points) * average_step / average_wave * c
+    # calibration_precision = std_dev * average_step / average_wave * c.value
 
     print(f"Calibration Precision estimated at {average_wave:.0f}nm: {calibration_precision:.0f} m/s")
     

@@ -176,6 +176,7 @@ def plot_scattered_light(frame, background, corrected_frame, veloce_paths, filen
     output_file = os.path.join(veloce_paths.plot_dir,
                                f'Fitted_scattered_light_{filename.split('.')[0]}.png')
     plt.savefig(output_file)
+    plt.close()
 
     return background_message, output_file
 
@@ -200,6 +201,7 @@ def plot_ccf(PIX, CCF, order, chunk, fit_lc_peak, general_gaussian, veloce_paths
     output_file = os.path.join(veloce_paths.plot_dir,
                                f'LC_peak_fit_order_{order}_{filename.split('.')[0]}.png')
     plt.savefig(output_file)
+    plt.close()
 
 def plot_offset_map(dispersion_position, orders_position, offset_array, veloce_paths=None, filename=None):
     """
@@ -218,6 +220,7 @@ def plot_offset_map(dispersion_position, orders_position, offset_array, veloce_p
     output_file = os.path.join(veloce_paths.plot_dir,
                                f'LC_offset_map_{filename.split('.')[0]}.png')
     plt.savefig(output_file)
+    plt.close()
 
 def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, veloce_paths=None, filename=None):
     """
@@ -240,3 +243,4 @@ def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, 
     output_file = os.path.join(veloce_paths.plot_dir,
                                f'LC_fitted_surface_{filename.split('.')[0]}.png')
     plt.savefig(output_file)
+    plt.close()

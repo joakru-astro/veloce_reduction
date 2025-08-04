@@ -31,7 +31,8 @@ def load_run_logs(science_targets, arm, veloce_paths):
     days = [format_date(date) for date in dates]
 
     obs_list = {'flat_red': {}, 'flat_green': {}, 'flat_blue': {}, 'flat_blue_long': {},
-                'ARC-ThAr': {}, 'SimThLong': {}, 'SimTh': {}, 'SimLC': {},
+                'ARC-ThAr_red': {}, 'ARC-ThAr_green': {}, 'ARC-ThAr_blue': {},
+                'SimThLong': {}, 'SimTh': {}, 'SimLC': {},
                 'dark': {}, 'bias': {}, 'science': {}}
     
     for day, date in zip(days, dates):
@@ -48,7 +49,8 @@ def load_night_logs(date, science_targets, arm, veloce_paths):
     day = format_date(date)
 
     obs_list = {'flat_red': {}, 'flat_green': {}, 'flat_blue': {}, 'flat_blue_long': {},
-                'ARC-ThAr': {}, 'SimThLong': {}, 'SimTh': {}, 'SimLC': {},
+                'ARC-ThAr_red': {}, 'ARC-ThAr_green': {}, 'ARC-ThAr_blue': {},
+                'SimThLong': {}, 'SimTh': {}, 'SimLC': {},
                 'dark': {}, 'bias': {}, 'science': {}}
     
     log_path = os.path.join(veloce_paths.input_dir, date)
@@ -85,7 +87,8 @@ def load_log_info(log_path, science_targets, selected_arm, day):
       and 10.0s for 'flat_blue').
     """
     obs_list = {'flat_red': [], 'flat_green': [], 'flat_blue': [], 'flat_blue_long': [],
-                'ARC-ThAr': [], 'SimThLong': [], 'SimTh': [], 'SimLC': [],
+                'ARC-ThAr_red': [], 'ARC-ThAr_green': [], 'ARC-ThAr_blue': [],
+                'SimThLong': [], 'SimTh': [], 'SimLC': [],
                 'dark': [], 'bias': [], 'science': []}
     arms = {'red': 3, 'green': 2, 'blue': 1, 'all': None}
     with open(log_path, 'r') as f:
@@ -110,7 +113,12 @@ def load_log_info(log_path, science_targets, selected_arm, day):
                             pass
                             # print(f"[Warning]: Non standard flat exp time = {exp_time} for {file_name}")
                     elif target.strip() == 'ARC-ThAr':
-                        obs_list['ARC-ThAr'].append(file_name)
+                        if float(exp_time) == 15 and int(arm) == 3:
+                            obs_list['ARC-ThAr_red'].append(file_name)
+                        elif float(exp_time) == 60 and int(arm) == 2:
+                            obs_list['ARC-ThAr_green'].append(file_name)
+                        elif float(exp_time) == 180 and int(arm) == 1:
+                            obs_list['ARC-ThAr_blue'].append(file_name)
                     elif target.strip() == 'SimThLong':
                         obs_list['SimThLong'].append(file_name)
                     elif target.strip() == 'SimTh':

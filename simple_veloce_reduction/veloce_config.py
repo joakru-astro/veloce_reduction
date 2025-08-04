@@ -20,6 +20,7 @@ class VelocePaths:
             if not os.path.exists(output_dir):
                 # raise FileNotFoundError(f'Output path does not exist: {output_dir}')
                 os.makedirs(output_dir)
+                self.output_dir = output_dir
             else:
                 self.output_dir = output_dir
         

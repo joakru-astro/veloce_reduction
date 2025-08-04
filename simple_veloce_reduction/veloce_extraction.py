@@ -23,7 +23,7 @@ def load_trace_data(arm, trace_path, sim_calib=False, filename=None):
         if sim_calib:
             filename = os.path.join(trace_path, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
         else:
-            filename = os.path.join(trace_path.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
+            filename = os.path.join(trace_path, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
     else:
         if arm.lower() not in filename.lower():
             # only checks the filename at this stage

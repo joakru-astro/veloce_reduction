@@ -1197,7 +1197,7 @@ def load_prefitted_wavecalib_trace(arm='red', calib_type='Th', trace_path=None, 
   """
 
   if trace_path is None:
-      veloce_paths = veloce_config.VelocePaths()
+      veloce_paths = veloce_config.VelocePaths(input_dir=os.getcwd(), output_dir=os.getcwd())
       trace_path = veloce_paths.trace_dir
   if filename is not None:
       filename = os.path.join(trace_path, filename)
@@ -1345,9 +1345,9 @@ def vacuum_to_air(wave):
     Taken from VALDwiki
     https://www.astro.uu.se/valdwiki/Air-to-vacuum%20conversion
     """
-    s = (10**4 / (wave*10))**2
+    s = 10**3 / wave
     n = 1 + 0.0000834254 + 0.02406147 / (130 - s**2) + 0.00015998 / (38.9 - s**2)
-    return (wave*10 / n)/10
+    return wave / n
     
 def air_to_vacuum(wave):
     """
@@ -1364,11 +1364,11 @@ def air_to_vacuum(wave):
     Taken from VALDwiki
     https://www.astro.uu.se/valdwiki/Air-to-vacuum%20conversion
     """
-    s = (10**4 / (wave*10))**2
-    n = 1 + 0.00008336624212083 + 0.02408926869968 / (130.1065924522 - s) + 0.0001599740894897 / (38.92568793293 - s)
-    return (wave*10 / n)/10
+    s = 10**3 / wave
+    n = 1 + 0.00008336624212083 + 0.02408926869968 / (130.1065924522 - s**2) + 0.0001599740894897 / (38.92568793293 - s**2)
+    return wave / n
 
-def get_master_mmap(obs_list, master_type, data_path, date, arm, amp_mode):
+def get_master_mmap(file_list, master_type, data_path, date, arm, amp_mode):
     """
     Generates a master frame by median combining individual frames for a given observation type and date using memory-mapped files.
 
@@ -1390,7 +1390,7 @@ def get_master_mmap(obs_list, master_type, data_path, date, arm, amp_mode):
       constructed file path.
     """
     data_sub_dirs = {'red': 'ccd_3', 'green': 'ccd_2', 'blue': 'ccd_1'}
-    file_list = obs_list[master_type][date]
+    # file_list = obs_list[master_type][date]
     num_files = len(file_list)
 
     if num_files == 0:
@@ -1505,6 +1505,7 @@ def save_image_fits(filename, image, hdr):
     - The function assumes that the Astropy package is installed and that the FITS file will be saved in the
       specified output directory.
     """
+    hdr['EXTEND'] = True
     hdu = fits.PrimaryHDU(image, header=hdr)
     hdul = fits.HDUList([hdu])
     hdul.writeto(filename, overwrite=True)
@@ -1551,6 +1552,7 @@ def save_extracted_spectrum_fits(filename, wave, flux, hdr):
     # hdr['CTYPE1'] = 'Wavelength'
     # hdr['CTYPE2'] = 'Flux'
     # hdr['CUNIT1'] = 'Nm'
+    hdr['EXTEND'] = True
     hdul[0].header = hdr
     
     hdul.writeto(filename, overwrite=True)
