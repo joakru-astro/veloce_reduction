@@ -126,11 +126,17 @@ def extract_run(target_list, config, veloce_paths, obs_list):
         # elif config['calib_type'] == 'Interpolate':
         #     wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation(target_list, obs_list, veloce_paths)
         else:
-            pass #load LC reference
+            pass # load LC?
 
         for date in target_list.keys(): 
             if config['flat_field']:
                 flat = get_flat(config, veloce_paths, arm, config['amplifier_mode'], date, obs_list)
+
+            if config['calib_type'] == 'arcTh':
+                arcTh_wave = veloce_wavecalib.calibrate_absolute_Th(traces, veloce_paths, obs_list,
+                                                   date, arm, config['amplifier_mode'],
+                                                   plot=config['plot_diagnostic'], plot_filename=f'arcTh_wavecalib_{arm}_{date}',
+                                                   th_linelist_filename='Default')
                 
             for obs in target_list[date]:
                 target, filename = obs
@@ -168,7 +174,13 @@ def extract_run(target_list, config, veloce_paths, obs_list):
                                 extracted_science_orders, veloce_paths, image_subtracted_bias,
                                 hdr, arm, plot=config['plot_diagnostic'], filename=filename)
                         
-                        final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
+                        if config['calib_type'] == 'SimLC' or config['calib_type'] == 'Static':
+                            final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
+                        elif config['calib_type'] == 'arcTh':
+                            final_wave, final_flux = arcTh_wave, extracted_science_orders
+                        else:
+                            # TODO: change to best available(?), same for if missing files/good data
+                            raise ValueError('Unsupported calib_type')
                         
                         if config['plot_diagnostic']:
                             veloce_diagnostic.plot_order_cross_section(
@@ -244,6 +256,12 @@ def extract_night(target_list, config, veloce_paths, obs_list):
         if config['flat_field']:
             flat = get_flat(config, veloce_paths, arm, config['amplifier_mode'], date, obs_list)
 
+        if config['calib_type'] == 'arcTh':
+            arcTh_wave = veloce_wavecalib.calibrate_absolute_Th(traces, veloce_paths, obs_list,
+                                               date, arm, config['amplifier_mode'],
+                                               plot=config['plot_diagnostic'], plot_filename=f'arcTh_wavecalib_{arm}_{date}',
+                                               th_linelist_filename='Default')
+
         for target, filename in target_list[date]:
         # for target, filename in target_list:
             if int(filename[5]) == arm_nums[arm]:
@@ -278,9 +296,14 @@ def extract_night(target_list, config, veloce_paths, obs_list):
                             vacuum_wave, final_flux = veloce_wavecalib.calibrate_simLC(
                                 extracted_science_orders, veloce_paths, image_subtracted_bias,
                                 hdr, arm, plot=config['plot_diagnostic'], filename=filename)
-                        
-                    final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
-
+                    
+                    if config['calib_type'] == 'SimLC' or config['calib_type'] == 'Static':
+                        final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
+                    elif config['calib_type'] == 'arcTh':
+                        final_wave, final_flux = arcTh_wave, extracted_science_orders
+                    else:
+                        raise ValueError('Unsupported calib_type')
+                    
                     if config['plot_diagnostic']:
                             veloce_diagnostic.plot_order_cross_section(
                                 image_subtracted_bias, traces, 10, filename,
@@ -349,6 +372,11 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
             static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
         # elif config['calib_type'] == 'Interpolate':
         #     wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation()
+        elif config['calib_type'] == 'arcTh':
+            arcTh_wave = veloce_wavecalib.calibrate_absolute_Th(traces, veloce_paths, obs_list,
+                                               config['date'], arm, config['amplifier_mode'],
+                                               plot=config['plot_diagnostic'], plot_filename=f'arcTh_wavecalib_{arm}_{config["date"]}',
+                                               th_linelist_filename='Default')
         else:
             pass
 
@@ -387,7 +415,11 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
                     vacuum_wave, final_flux = veloce_wavecalib.calibrate_simLC(
                                 extracted_science_orders, veloce_paths, image_subtracted_bias,
                                 hdr, arm, plot=config['plot_diagnostic'], filename=filename)
-                final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
+                    
+                if config['calib_type'] == 'SimLC' or config['calib_type'] == 'Static':
+                    final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
+                elif config['calib_type'] == 'arcTh':
+                    final_wave, final_flux = arcTh_wave, extracted_science_orders
 
                 if config['plot_diagnostic']:
                             veloce_diagnostic.plot_order_cross_section(

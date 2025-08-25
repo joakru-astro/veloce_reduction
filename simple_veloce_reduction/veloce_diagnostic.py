@@ -1,13 +1,15 @@
-from astropy.io import fits
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+from astropy.io import fits
+from astropy.constants import c
 from scipy.signal import find_peaks
+from mpl_toolkits.mplot3d import Axes3D
 
 from . import veloce_reduction_tools
 
-def plot_order_cross_section(frame, traces, order, filename, veloce_paths, plot_type='median', margin=[10,10]):
+def plot_order_cross_section(frame, traces, order, filename, veloce_paths, plot_type='median', margin=[10,10], show=False):
     """
     Plots a cross-section of a spectral order from a 2D frame.
 
@@ -99,11 +101,14 @@ def plot_order_cross_section(frame, traces, order, filename, veloce_paths, plot_
     plt.ylabel("Counts")
     
     plt.savefig(output_file)
-    plt.close()
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
     return output_file
 
-def plot_extracted_2D_order(extracted_order_imgs, order, traces, filename, veloce_paths, flatfielded=False, flatfield=None):
+def plot_extracted_2D_order(extracted_order_imgs, order, traces, filename, veloce_paths, flatfielded=False, flatfield=None, show=False):
     lower_range, upper_range = float(traces.summing_ranges_lower[order]), float(traces.summing_ranges_upper[order])
     
     xticks = np.arange(lower_range % 10, lower_range + upper_range + 1, 10)
@@ -147,10 +152,14 @@ def plot_extracted_2D_order(extracted_order_imgs, order, traces, filename, veloc
                                f'Extracted_order_{order}_{filename.split('.')[0]}.png')
 
     plt.savefig(output_file)
-    plt.close()
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
     return output_file
 
-def plot_scattered_light(frame, background, corrected_frame, veloce_paths, filename, traces):
+def plot_scattered_light(frame, background, corrected_frame, veloce_paths, filename, traces, show=False):
     ### TODO add statistics inside trace
     head = 'Background statistics:\n---'
     median_str = f'median = {np.median(background)}'
@@ -176,11 +185,14 @@ def plot_scattered_light(frame, background, corrected_frame, veloce_paths, filen
     output_file = os.path.join(veloce_paths.plot_dir,
                                f'Fitted_scattered_light_{filename.split('.')[0]}.png')
     plt.savefig(output_file)
-    plt.close()
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
     return background_message, output_file
 
-def plot_ccf(PIX, CCF, order, chunk, fit_lc_peak, general_gaussian, veloce_paths=None, filename=None):
+def plot_ccf(PIX, CCF, order, chunk, fit_lc_peak, general_gaussian, veloce_paths=None, filename=None, show=False):
     fitting_limit = np.ceil(np.mean(np.diff(find_peaks(CCF[order-1][chunk])[0])))/2 + 1
     plt.figure(figsize=(10, 6))
     plt.title('Cross-Correlation Function')
@@ -201,9 +213,14 @@ def plot_ccf(PIX, CCF, order, chunk, fit_lc_peak, general_gaussian, veloce_paths
     output_file = os.path.join(veloce_paths.plot_dir,
                                f'LC_peak_fit_order_{order}_{filename.split('.')[0]}.png')
     plt.savefig(output_file)
-    plt.close()
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
-def plot_offset_map(dispersion_position, orders_position, offset_array, veloce_paths=None, filename=None):
+    return output_file
+
+def plot_offset_map(dispersion_position, orders_position, offset_array, veloce_paths=None, filename=None, show=False):
     """
     Plot the offset map in 3D.
     """    
@@ -220,9 +237,14 @@ def plot_offset_map(dispersion_position, orders_position, offset_array, veloce_p
     output_file = os.path.join(veloce_paths.plot_dir,
                                f'LC_offset_map_{filename.split('.')[0]}.png')
     plt.savefig(output_file)
-    plt.close()
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
-def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, veloce_paths=None, filename=None):
+    return output_file
+
+def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, veloce_paths=None, filename=None, show=False):
     """
     Plot the offset map in 3D.
     """
@@ -234,7 +256,7 @@ def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, 
     surf = ax.plot_surface(X, Y, surface_points, vmin=np.min(filtered_points[:,2]), vmax=np.max(filtered_points[:,2]), cmap='viridis', edgecolor='none', alpha=0.5)
     points = ax.scatter(filtered_points[:,0], filtered_points[:,1], filtered_points[:,2], c=filtered_points[:,2], cmap='viridis', marker='o')
     ax.set_title('Offset Map')
-    ax.set_xlabel('Dispersion Position')
+    ax.set_xlabel('Echelle Dispersion Position')
     ax.set_ylabel('Orders')
     ax.set_zlabel('Offset')
     fig.colorbar(points, shrink=0.5, aspect=10)
@@ -243,4 +265,185 @@ def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, 
     output_file = os.path.join(veloce_paths.plot_dir,
                                f'LC_fitted_surface_{filename.split('.')[0]}.png')
     plt.savefig(output_file)
-    plt.close()
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+    return output_file
+
+def plot_ArcTh_points_positions(pixel_positions, order_positions, mask, veloce_paths, filename, show=False):
+    plt.close('all')
+
+    fig, ax = plt.subplots()
+
+    if np.sum(mask)/len(mask)<=0.5:
+        ax.scatter(order_positions[~mask], pixel_positions[~mask], color='r', marker='x', label='rejected points')
+        ax.scatter(order_positions[mask], pixel_positions[mask], color='k', marker='o', label='fitted points')
+    else:
+        ax.scatter(order_positions[mask], pixel_positions[mask], color='k', marker='o', label='fitted points')
+        ax.scatter(order_positions[~mask], pixel_positions[~mask], color='r', marker='x', label='rejected points')
+    
+    # Label number of used points above point with highest pixel per order
+    for order_val in np.unique(order_positions):
+        in_order = (order_positions == order_val)
+        in_order_mask = in_order & mask
+        if np.any(in_order):
+            # Find the point with the highest pixel in this order (regardless of mask)
+            max_pixel = np.max(pixel_positions[in_order])
+            idx = np.where(in_order & (pixel_positions == max_pixel))[0]
+            if len(idx) > 0:
+                idx = idx[0]
+                n_used = np.sum(in_order_mask)
+                ax.text(order_positions[idx], pixel_positions[idx]+20, f"{n_used}",
+                        ha='center', va='bottom', fontsize=9, color='blue')
+
+    ax.set_xlabel('Order number')
+    ax.set_ylabel('Echelle Dispersion [pixel]')
+    ax.set_title(f'Points used for fitting (X,Y): kept {np.sum(mask)} out of {len(mask)}')
+    # Move legend outside the plot
+    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax.legend()
+    output_file = os.path.join(veloce_paths.plot_dir,
+                               f'ArcTh_line_positions_used_per_order_{filename.split('.')[0]}.png')
+    plt.savefig(output_file)
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+    return output_file
+
+def plot_ArcTh_surface(Z, pixel_positions, order_positions, wave_positions, full_pixels, veloce_paths, filename=None, show=False):
+    plt.close('all')
+
+    fig = plt.figure(figsize=(10, 7))
+    ax = fig.add_subplot(111, projection='3d')
+    ax.view_init(elev=30, azim=245)
+
+    # Plot fitted surface
+    X, Y = np.meshgrid(full_pixels[0], np.unique(order_positions))
+    ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.7, linewidth=0, antialiased=False)
+
+    # Plot input data points
+    ax.scatter(pixel_positions, order_positions, order_positions*wave_positions, c='k', s=10, label='Input data')
+
+    ax.set_xlabel('Echelle Dispersion [pixel]')
+    ax.set_ylabel('Order')
+    ax.set_zlabel(r'Order $\times$ $\lambda$ [nm]')
+    ax.set_title('Input ArcTh lines and Fitted Surface')
+    ax.legend()
+    if filename is not None:
+        output_file = os.path.join(veloce_paths.plot_dir,
+                               f'Th_fitted_surface_{filename.split('.')[0]}.png')
+    plt.savefig(output_file)
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+    return output_file
+
+def plot_ArcTh_residuals(residuals, order_positions, pixel_positions, wave_positions, mask, veloce_paths, filename, plot_type='velocity', show=False):
+    per_order_residual_mean = []
+    for order in np.unique(order_positions):
+        in_order_mask = (order_positions == order)
+        in_order_mask *= mask
+        if plot_type == 'velocity':
+            in_order_residual_mean = np.mean(residuals[in_order_mask]/order_positions[in_order_mask]/wave_positions[in_order_mask]*c.value)
+        elif plot_type == 'wavelength':
+            in_order_residual_mean = np.mean(residuals[in_order_mask]/order_positions[in_order_mask])
+        else:
+            raise ValueError("plot_type must be 'velocity' or 'wavelength'")
+        per_order_residual_mean.append(in_order_residual_mean)
+    per_order_residual_mean = np.array(per_order_residual_mean)
+    
+    dispersion_binned_mean = []
+    dispersion_bin_pos = []
+    bin_size = 100
+    for dispersion_bin in np.arange(np.min(pixel_positions[mask]), np.max(pixel_positions[mask]), bin_size):
+        dispersion_bin_pos.append(dispersion_bin+bin_size/2)
+        bin_mask = (pixel_positions>dispersion_bin) & (pixel_positions<dispersion_bin+bin_size)
+        bin_mask *= mask
+        if plot_type == 'velocity':
+            in_bin_residual_mean = np.mean(residuals[bin_mask]/order_positions[bin_mask]/wave_positions[bin_mask]*c.value)
+        elif plot_type == 'wavelength':
+            in_bin_residual_mean = np.mean(residuals[bin_mask]/order_positions[bin_mask])
+        else:
+            raise ValueError("plot_type must be 'velocity' or 'wavelength'")
+        dispersion_binned_mean.append(in_bin_residual_mean)
+    dispersion_binned_mean = np.array(dispersion_binned_mean)
+    dispersion_bin_pos = np.array(dispersion_bin_pos)
+
+    if plot_type == 'velocity':
+        _residuals = residuals/order_positions/wave_positions*c.value
+        rmse = np.sqrt(np.mean(_residuals[mask]**2))
+        # std_vel = np.std(_residuals[mask])
+        # sme = std_vel/np.sqrt(np.sum(mask))
+    elif plot_type == 'wavelength':
+        _residuals = residuals/order_positions
+        rmse = np.sqrt(np.mean(_residuals[mask]**2))
+        # std_vel = np.std(_residuals[mask])
+        # sme = std_vel/np.sqrt(np.sum(mask))
+    else:
+        raise ValueError("plot_type must be 'velocity' or 'wavelength'")
+
+    plt.close('all')
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7), gridspec_kw={'hspace': 0, 'wspace': 0})
+
+    axes[0,0].scatter(pixel_positions[~mask], _residuals[~mask], c='r', s=10, marker='x', alpha=0.7, label='Residuals of rejected lines')
+    axes[0,0].scatter(pixel_positions[mask], _residuals[mask], c='k', s=10, label='Residuals of fitted lines')
+    axes[0,0].legend()
+    axes[1,0].scatter(pixel_positions[mask], _residuals[mask], c='k', s=10, label='Residuals')
+    axes[1,0].plot(dispersion_bin_pos, dispersion_binned_mean, c='r', label='Residual mean (binned)')
+    axes[1,0].axhline(rmse, color='blue', ls='--')
+    axes[1,0].axhline(-1*rmse, color='blue', ls='--')
+    axes[1,0].legend()
+    ylim = axes[1,0].get_ylim()
+    xlim = axes[1,0].get_xlim()
+    x_pos = xlim[1] - 0.02 * (xlim[1] - xlim[0])
+    y_pos = rmse + 0.02 * (ylim[1] - ylim[0])
+    axes[1,0].text(x_pos, y_pos, 'RMSE', color='blue', ha='right', va='bottom', fontsize=9)
+
+    axes[0,1].scatter(order_positions[~mask], _residuals[~mask], c='r', s=10, marker='x', alpha=0.7, label='Residuals of rejected lines')
+    axes[0,1].scatter(order_positions[mask], _residuals[mask], c='k', s=10, label='Residuals of fitted lines')
+    axes[0,1].legend()
+    axes[1,1].scatter(order_positions[mask], _residuals[mask], c='k', s=10, label='Residuals')
+    axes[1,1].plot(np.unique(order_positions), per_order_residual_mean, c='r', label='Residual mean per order')
+    axes[1,1].axhline(rmse, color='blue', ls='--')
+    axes[1,1].axhline(-1*rmse, color='blue', ls='--')
+    axes[1,1].legend()
+    ylim = axes[1,1].get_ylim()
+    xlim = axes[1,1].get_xlim()
+    x_pos = xlim[1] - 0.02 * (xlim[1] - xlim[0])
+    y_pos = rmse + 0.02 * (ylim[1] - ylim[0])
+    axes[1,1].text(x_pos, y_pos, 'RMSE', color='blue', ha='right', va='bottom', fontsize=9)
+    
+    for ax in axes.flat:
+        ax.tick_params(direction='in', which='both')
+    
+    axes[0,0].tick_params(labelbottom=False)
+    axes[0,1].tick_params(labelbottom=False, labelleft=False)
+    axes[1,1].tick_params(labelleft=False)
+
+    axes[1,1].set_xlabel('Order number')
+    axes[1,0].set_xlabel('Echelle dispersion [pixel]')
+    if plot_type == 'velocity':
+        plt.suptitle('Residuals of Fitted Surface, RMSE: {:.1e} [m/s]'.format(rmse))
+        axes[0,0].set_ylabel('Velocity [m/s]')
+        axes[1,0].set_ylabel('Velocity [m/s]')
+    elif plot_type == 'wavelength':
+        plt.suptitle('Residuals of Fitted Surface, RMSE: {:.1e} [nm]'.format(rmse))
+        axes[0,0].set_ylabel(r'$\lambda$ [nm]')
+        axes[1,0].set_ylabel(r'$\lambda$ [nm]')
+    
+    # ax.legend()
+    output_file = os.path.join(veloce_paths.plot_dir,
+                               f'Th_residuals_{filename.split('.')[0]}.png')
+    plt.savefig(output_file)
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+    return output_file

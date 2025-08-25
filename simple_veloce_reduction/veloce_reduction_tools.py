@@ -1368,6 +1368,26 @@ def air_to_vacuum(wave):
     n = 1 + 0.00008336624212083 + 0.02408926869968 / (130.1065924522 - s**2) + 0.0001599740894897 / (38.92568793293 - s**2)
     return wave / n
 
+def get_longest_consecutive_files(file_list):
+    """Shorter version for your specific use case"""
+    # Sort files by their 4-digit index
+    if not file_list:
+        raise ValueError("File list is empty")
+    sorted_files = sorted(file_list, key=lambda x: int(x[-9:-5]))
+    
+    longest = []
+    current = [sorted_files[0]] if sorted_files else []
+    
+    for i in range(1, len(sorted_files)):
+        if int(sorted_files[i][-9:-5]) == int(sorted_files[i-1][-9:-5]) + 1:
+            current.append(sorted_files[i])
+        else:
+            if len(current) > len(longest):
+                longest = current[:]
+            current = [sorted_files[i]]
+    
+    return longest
+
 def get_master_mmap(file_list, master_type, data_path, date, arm, amp_mode):
     """
     Generates a master frame by median combining individual frames for a given observation type and date using memory-mapped files.

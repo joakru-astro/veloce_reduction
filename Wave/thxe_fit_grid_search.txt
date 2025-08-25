@@ -1,0 +1,66 @@
+Red:
+Top 10 Parameter Combinations:
+================================================================================
+ Degree  Sigma Clip Std Velocity [m/s] RMS Velocity [m/s] Points Used Fraction Used  Min Points/Order
+      7         1.3              2.472             53.415    467/2294         20.4%                 9
+      7         1.2              2.518             53.000    443/2294         19.3%                 9
+      7         1.4              2.601             59.359    521/2294         22.7%                 9
+      7         1.0              2.712             53.704    392/2294         17.1%                 9
+      8         1.3              2.732             65.903    582/2294         25.4%                10
+      6         1.4              2.776             61.759    495/2294         21.6%                 8
+      6         1.5              2.831             65.919    542/2294         23.6%                 8
+      6         1.6              2.885             70.322    594/2294         25.9%                 8
+      7         1.6              2.896             75.359    677/2294         29.5%                 9
+      7         1.5              2.919             75.113    662/2294         28.9%                 9
+
+Optimal parameters: degree=7, sigma_clip=1.3
+Converged.
+Std of residuals dropped from 1.632 to 0.009 after 20 iterations. (This is wave[nm]*ORDER)
+From Pareto analysis:
+deg=7, σ=2.3
+std_velocity: 4.894
+n_points_used: 1236.000
+
+Green:
+Top 10 Parameter Combinations:
+================================================================================
+ Degree  Sigma Clip Std Velocity [m/s] RMS Velocity [m/s] Points Used Fraction Used  Min Points/Order
+      7         1.4              0.554             10.395    352/2508         14.0%                 9
+      7         1.6              0.559             11.017    389/2508         15.5%                 9
+      7         1.5              0.572             11.034    372/2508         14.8%                 9
+      7         1.2              0.577             10.863    354/2508         14.1%                 9
+      7         1.8              0.583             11.973    422/2508         16.8%                 9
+      7         1.3              0.585             10.971    352/2508         14.0%                 9
+      7         1.0              0.596             11.119    348/2508         13.9%                 9
+      6         1.4              1.127             20.568    333/2508         13.3%                 8
+      6         1.2              1.192             21.321    320/2508         12.8%                 8
+      6         1.3              1.195             21.942    337/2508         13.4%                 8
+
+Optimal parameters: degree=7, sigma_clip=1.4
+Converged.
+Std of residuals dropped from 0.263 to 0.002 after 37 iterations.
+deg=7, σ=2.2
+std_velocity: 2.174
+n_points_used: 1495.000
+
+Blue:
+Top 10 Parameter Combinations:
+================================================================================
+ Degree  Sigma Clip Std Velocity [m/s] RMS Velocity [m/s] Points Used Fraction Used  Min Points/Order
+      6         1.4              1.471             29.226    395/1535         25.7%                 8
+      6         1.3              1.474             28.653    378/1535         24.6%                 8
+      6         1.5              1.484             30.271    416/1535         27.1%                 8
+      6         1.2              1.530             29.107    362/1535         23.6%                 8
+      6         1.0              1.531             27.180    315/1535         20.5%                 8
+      6         1.6              1.548             33.103    457/1535         29.8%                 8
+      6         1.8              1.623             37.328    529/1535         34.5%                 8
+      5         1.2              1.630             26.779    270/1535         17.6%                 7
+      5         1.4              1.658             30.072    329/1535         21.4%                 7
+      5         1.3              1.678             29.924    318/1535         20.7%                 7
+
+Optimal parameters: degree=6, sigma_clip=1.4
+Converged.
+Std of residuals dropped from 0.236 to 0.006 after 26 iterations.
+deg=6, σ=2.3
+std_velocity: 3.556
+n_points_used: 1019.000

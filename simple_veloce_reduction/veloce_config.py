@@ -139,8 +139,8 @@ def validate_config(config):
     # validate options set in config file
     if config['reduce'] not in ['run', 'night', 'file']:
         raise ValueError(f'reduce must be "run", "night" or "file", not {config["reduce"]}')
-    if config['calib_type'] not in ['SimLC', 'SimThXe', 'Interpolate', 'Static']:
-        raise ValueError(f'calib_type must be "SimLC", "SimThXe", "Interpolate" or "Static", not {config["calib_type"]}')
+    if config['calib_type'] not in ['SimLC', 'SimThXe', 'Interpolate', 'Static', 'arcTh']:
+        raise ValueError(f'calib_type must be "SimLC", "SimThXe", "Interpolate", "arcTh or "Static", not {config["calib_type"]}')
     if config['arm'] not in ['all', 'red', 'green', 'blue']:
         raise ValueError(f'arm must be "all", "red", "green" or "blue", not {config["arm"]}')
     if config['amplifier_mode'] not in [2, 4]:
