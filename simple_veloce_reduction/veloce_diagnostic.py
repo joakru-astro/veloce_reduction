@@ -148,9 +148,11 @@ def plot_extracted_2D_order(extracted_order_imgs, order, traces, filename, veloc
         ax.set_xlabel("Pixel")
         ax.set_ylabel("Row")
 
-    output_file = os.path.join(veloce_paths.plot_dir,
+    if filename is not None:
+        output_file = os.path.join(veloce_paths.plot_dir,
                                f'Extracted_order_{order}_{filename.split('.')[0]}.png')
-
+    else:
+        output_file = None
     plt.savefig(output_file)
     if show:
         plt.show()
@@ -159,7 +161,7 @@ def plot_extracted_2D_order(extracted_order_imgs, order, traces, filename, veloc
 
     return output_file
 
-def plot_scattered_light(frame, background, corrected_frame, veloce_paths, filename, traces, show=False):
+def plot_scattered_light(frame, background, corrected_frame, veloce_paths, filename=None, show=False):
     ### TODO add statistics inside trace
     head = 'Background statistics:\n---'
     median_str = f'median = {np.median(background)}'
@@ -182,9 +184,13 @@ def plot_scattered_light(frame, background, corrected_frame, veloce_paths, filen
 
     # fig.colorbar(ax, ax=fig.get_axes())
     plt.tight_layout()
-    output_file = os.path.join(veloce_paths.plot_dir,
-                               f'Fitted_scattered_light_{filename.split('.')[0]}.png')
-    plt.savefig(output_file)
+
+    if filename is not None:
+        output_file = os.path.join(veloce_paths.plot_dir,
+                                   f'Fitted_scattered_light_{filename.split('.')[0]}.png')
+        plt.savefig(output_file)
+    else:
+        output_file = None
     if show:
         plt.show()
     else:
@@ -210,9 +216,12 @@ def plot_ccf(PIX, CCF, order, chunk, fit_lc_peak, general_gaussian, veloce_paths
     plt.grid()
     plt.tight_layout()
 
-    output_file = os.path.join(veloce_paths.plot_dir,
-                               f'LC_peak_fit_order_{order}_{filename.split('.')[0]}.png')
-    plt.savefig(output_file)
+    if filename is not None:
+        output_file = os.path.join(veloce_paths.plot_dir,
+                                   f'LC_peak_fit_order_{order}_{filename.split('.')[0]}.png')
+        plt.savefig(output_file)
+    else:
+        output_file = None
     if show:
         plt.show()
     else:
@@ -234,9 +243,12 @@ def plot_offset_map(dispersion_position, orders_position, offset_array, veloce_p
     fig.colorbar(points, shrink=0.5, aspect=10)
     plt.tight_layout()
 
-    output_file = os.path.join(veloce_paths.plot_dir,
-                               f'LC_offset_map_{filename.split('.')[0]}.png')
-    plt.savefig(output_file)
+    if filename is not None:
+        output_file = os.path.join(veloce_paths.plot_dir,
+                                   f'LC_offset_map_{filename.split('.')[0]}.png')
+        plt.savefig(output_file)
+    else:
+        output_file = None
     if show:
         plt.show()
     else:
@@ -248,7 +260,7 @@ def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, 
     """
     Plot the offset map in 3D.
     """
-    fig = plt.figure(figsize=(8, 8))
+    fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
     max_pixel = max([np.nanmax(order) for order in extracted_pixels])+1
     min_pixel = min([np.nanmin(order) for order in extracted_pixels])
@@ -262,9 +274,12 @@ def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, 
     fig.colorbar(points, shrink=0.5, aspect=10)
     plt.tight_layout()
 
-    output_file = os.path.join(veloce_paths.plot_dir,
-                               f'LC_fitted_surface_{filename.split('.')[0]}.png')
-    plt.savefig(output_file)
+    if filename is not None:
+        output_file = os.path.join(veloce_paths.plot_dir,
+                                f'LC_fitted_surface_{filename.split('.')[0]}.png')
+        plt.savefig(output_file)
+    else:
+        output_file = None
     if show:
         plt.show()
     else:
@@ -272,7 +287,7 @@ def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, 
 
     return output_file
 
-def plot_ArcTh_points_positions(pixel_positions, order_positions, mask, veloce_paths, filename, show=False):
+def plot_ArcTh_points_positions(pixel_positions, order_positions, mask, veloce_paths, filename=None, show=False):
     plt.close('all')
 
     fig, ax = plt.subplots()
@@ -301,12 +316,18 @@ def plot_ArcTh_points_positions(pixel_positions, order_positions, mask, veloce_p
     ax.set_xlabel('Order number')
     ax.set_ylabel('Echelle Dispersion [pixel]')
     ax.set_title(f'Points used for fitting (X,Y): kept {np.sum(mask)} out of {len(mask)}')
-    # Move legend outside the plot
+    # Shrink the box and move legend outside the plot
+    box = ax.get_position()
+    ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     ax.legend()
-    output_file = os.path.join(veloce_paths.plot_dir,
+    plt.tight_layout()
+    if filename is not None:
+        output_file = os.path.join(veloce_paths.plot_dir,
                                f'ArcTh_line_positions_used_per_order_{filename.split('.')[0]}.png')
-    plt.savefig(output_file)
+        plt.savefig(output_file)
+    else:
+        output_file = None
     if show:
         plt.show()
     else:
@@ -336,7 +357,9 @@ def plot_ArcTh_surface(Z, pixel_positions, order_positions, wave_positions, full
     if filename is not None:
         output_file = os.path.join(veloce_paths.plot_dir,
                                f'Th_fitted_surface_{filename.split('.')[0]}.png')
-    plt.savefig(output_file)
+        plt.savefig(output_file)
+    else:
+        output_file = None
     if show:
         plt.show()
     else:
@@ -344,7 +367,7 @@ def plot_ArcTh_surface(Z, pixel_positions, order_positions, wave_positions, full
 
     return output_file
 
-def plot_ArcTh_residuals(residuals, order_positions, pixel_positions, wave_positions, mask, veloce_paths, filename, plot_type='velocity', show=False):
+def plot_ArcTh_residuals(residuals, order_positions, pixel_positions, wave_positions, mask, veloce_paths, filename=None, plot_type='velocity', show=False):
     per_order_residual_mean = []
     for order in np.unique(order_positions):
         in_order_mask = (order_positions == order)
@@ -420,7 +443,7 @@ def plot_ArcTh_residuals(residuals, order_positions, pixel_positions, wave_posit
     axes[1,1].text(x_pos, y_pos, 'RMSE', color='blue', ha='right', va='bottom', fontsize=9)
     
     for ax in axes.flat:
-        ax.tick_params(direction='in', which='both')
+        ax.tick_params(direction='in', which='both', bottom=True, top=True, left=True, right=True)
     
     axes[0,0].tick_params(labelbottom=False)
     axes[0,1].tick_params(labelbottom=False, labelleft=False)
@@ -438,9 +461,13 @@ def plot_ArcTh_residuals(residuals, order_positions, pixel_positions, wave_posit
         axes[1,0].set_ylabel(r'$\lambda$ [nm]')
     
     # ax.legend()
-    output_file = os.path.join(veloce_paths.plot_dir,
+    if filename is not None:
+        output_file = os.path.join(veloce_paths.plot_dir,
                                f'Th_residuals_{filename.split('.')[0]}.png')
-    plt.savefig(output_file)
+        plt.savefig(output_file)
+    else:
+        output_file = None
+    
     if show:
         plt.show()
     else:

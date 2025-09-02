@@ -251,6 +251,8 @@ class Traces:
         - max_iterations (int, optional): Maximum number of iterations for the fitting process. Default is 100.
         - tolerance (float, optional): Convergence tolerance for the fitting process. Default is 1e-3.
         """
+        ### TODO: there is an issue that if the trace is not well defined in the first place, it can jump to a different order, for LC I noticed it sometimes skips over the existing trace
+
         # if traces is not None:
         #     trace_y, trace_x = [trace[0] for trace in traces], [trace[1] for trace in traces]
         # elif trace_x is None or trace_y is None:
@@ -1366,7 +1368,7 @@ def air_to_vacuum(wave):
     """
     s = 10**3 / wave
     n = 1 + 0.00008336624212083 + 0.02408926869968 / (130.1065924522 - s**2) + 0.0001599740894897 / (38.92568793293 - s**2)
-    return wave / n
+    return wave * n
 
 def get_longest_consecutive_files(file_list):
     """Shorter version for your specific use case"""
@@ -1385,7 +1387,8 @@ def get_longest_consecutive_files(file_list):
             if len(current) > len(longest):
                 longest = current[:]
             current = [sorted_files[i]]
-    
+    if len(current) > len(longest):
+        longest = current[:]
     return longest
 
 def get_master_mmap(file_list, master_type, data_path, date, arm, amp_mode):

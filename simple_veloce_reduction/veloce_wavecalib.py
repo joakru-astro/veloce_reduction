@@ -118,7 +118,7 @@ def load_simultanous_LC(image, veloce_paths, hdr, arm, ref_orders=None, ref_pixe
 def general_gaussian(x, A, mu, sigma, beta, baseline):
     return A * np.exp(-np.abs(((x - mu)/(np.sqrt(2)*sigma)))**beta) + baseline
 
-def fit_lc_peak(pix_shift, ccf):
+def fit_lc_peak(pix_shift, ccf, fitting_limit=None):
     # pix_shift = pix_shift[~np.isnan(pix_shift)]
     ccf = ccf[~np.isnan(ccf)]
     
@@ -127,7 +127,9 @@ def fit_lc_peak(pix_shift, ccf):
         return np.nan, [np.nan]
     
     # consider peak near 0 pixel shift
-    fitting_limit = np.ceil(np.mean(np.diff(signal.find_peaks(ccf)[0])))/2 + 1
+    if fitting_limit is None:
+        fitting_limit = np.ceil(np.mean(np.diff(signal.find_peaks(ccf)[0])))/2 + 1
+        print(f"[Info] Fitting limit for LC peak fitting set to {fitting_limit:.2f} pixel.")
     _pix_shift = pix_shift[abs(pix_shift) <= fitting_limit]
     _ccf = ccf[abs(pix_shift) <= fitting_limit]
     # _ccf -= np.min(_ccf)
@@ -139,14 +141,16 @@ def fit_lc_peak(pix_shift, ccf):
     sigma = 0.8
     beta = 2.0
     baseline = np.min(_ccf)
-
-    popt, _ = curve_fit(general_gaussian, _pix_shift, _ccf,
+    try:
+        popt, _ = curve_fit(general_gaussian, _pix_shift, _ccf,
                         p0=[peak, peak_position, sigma, beta, baseline],
                         bounds=([0, np.min(_pix_shift), 1e-3, 1e-3, 0], [2*peak, np.max(_pix_shift), 10, 10, peak]),)
+        return popt[1], popt
+    except Exception as e:
+        print(f"[Warning] LC peak fitting failed: {e}")
+        return np.nan, [np.nan]
 
-    return popt[1], popt
-
-def calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_pixel, number_of_parts=8, plot=False, veloce_paths=None, filename=None):
+def calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_pixel, number_of_parts=8, mode='LC', plot=False, veloce_paths=None, filename=None):
     """
     Calculate the cross-correlation function (CCF) for each order of the laser comb.
     """
@@ -178,7 +182,12 @@ def calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_
     ])
 
     orders_position = np.repeat(np.array(ref_orders).reshape(len(ref_orders), 1), dispersion_position.shape[1], axis=1)
-    offset_array = np.array([[fit_lc_peak(pixel_shifts[i][j], CCF[i][j])[0] for j in range(number_of_parts)] for i in range(len(ref_orders))])
+    if mode == 'LC':
+        offset_array = np.array([[fit_lc_peak(pixel_shifts[i][j], CCF[i][j])[0] for j in range(number_of_parts)] for i in range(len(ref_orders))])
+    elif mode == 'Th':
+        offset_array = np.array([[fit_lc_peak(pixel_shifts[i][j], CCF[i][j], fitting_limit=30)[0] for j in range(number_of_parts)] for i in range(len(ref_orders))])
+    else:
+        raise ValueError("Mode must be 'LC' or 'Th'.")
     
     if plot:
         veloce_diagnostic.plot_ccf(pixel_shifts, CCF, 15, 4, fit_lc_peak, general_gaussian,
@@ -367,6 +376,15 @@ def load_static_Th_wavelength_solution(arm, veloce_paths, traces):
         assert len(w) == len(trace_y), "Size missmatch between used trace and static wavelength solution."
     return wave
 
+def load_reference_Th_spectrum(arm, veloce_paths):
+    ref_th_file = os.path.join(veloce_paths.wave_dir, f'Th_reference_spectrum_230828_{arm}.pkl')
+    if not os.path.exists(ref_th_file):
+        raise FileNotFoundError(f"Reference Th spectrum file not found: {ref_th_file}")
+    with fits.open(ref_th_file) as hdul:
+        ref_th_spectrum = hdul[0].data
+        ref_th_header = hdul[0].header
+    return ref_th_spectrum, ref_th_header
+
 # def get_Th_master(obs_list, arm, )
 #     master_flat_filename = os.path.join(veloce_paths.master_dir, f'master_flat_{arm}_{date}.fits')
 #     if os.path.exists(master_flat_filename):
@@ -463,28 +481,34 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
     Returns:
     - baseline: Normalized flux values after spline fitting.
     """
-    x = np.arange(len(y))
+    ylen = len(y)
+    x = np.arange(ylen)
+    _y = y + 1
     
     # Initial knot distribution
     if node_distribution == 'linear':
         x_fit = np.linspace(x.min(), x.max(), nknots)
     elif node_distribution == 'chebyshev':
-        cheb_nodes = np.cos((2 * np.arange(1, nknots + 1) - 1) * np.pi / (2 * nknots))
+        # Generate standard Chebyshev nodes on [-1, 1]
+        k = np.arange(1, nknots + 1)
+        cheb_nodes = np.cos((2 * k - 1) * np.pi / (2 * nknots))
+        
+        # Transform from [-1, 1] to [x.min(), x.max()]
         x_fit = 0.5 * (x.max() - x.min()) * (cheb_nodes + 1) + x.min()
-        x_fit = np.sort(x_fit)
+        x_fit = np.sort(x_fit)  # Sort in ascending order
     else:
         raise ValueError("Invalid node_distribution. Use 'linear' or 'chebyshev'.")
     intial_knots = x_fit.copy()
     # Local percentile-based peak detection (catches weaker peaks)
-    window_size = len(y) // (nknots * 2)  # Adaptive window size
+    window_size = ylen // (nknots * 2)  # Adaptive window size
 
     print(f"Using window size: {window_size}")
 
     signal_peaks = []
-    for i in range(len(y)):
+    for i in range(ylen):
         start = max(0, i - window_size//2)
-        end = min(len(y), i + window_size//2 + 1)
-        local_window = y[start:end]
+        end = min(ylen, i + window_size//2 + 1)
+        local_window = _y[start:end]
         # Find peaks in this window
         peaks, _ = find_peaks(local_window, prominence=(np.median(local_window)-np.min(local_window)))
         # Convert local indices to global indices
@@ -495,32 +519,31 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
     for peak in signal_peaks:
         # Search left
         left = peak
-        while left > 0 and y[left-1] < y[left]:
+        while left > 0 and _y[left-1] < _y[left]:
             left -= 1
         # Search right
         right = peak
-        while right < len(y)-1 and y[right+1] < y[right]:
+        while right < ylen-1 and _y[right+1] < _y[right]:
             right += 1
         # Add all points from left to right (inclusive)
         extended_peaks.update(range(left+1, right)) # don't use the actual floor points 
     extended_peaks = sorted(extended_peaks)
-    print(f"Detected {len(extended_peaks)} peaks using signal method with window size {window_size}")
     
     # all_detected_peaks = np.unique(np.concatenate((percentile_peaks, extended_peaks)))
     all_detected_peaks = np.unique(np.array(extended_peaks))
     print(f"Detected {len(extended_peaks)} peaks using signal method with window size {window_size}")
-    print(f"Total detected peaks: {len(all_detected_peaks)}")
+    # print(f"Total detected peaks: {len(all_detected_peaks)}")
     
     # Create a mask for all detected peaks
-    peak_mask = np.zeros_like(y, dtype=bool)
+    peak_mask = np.zeros_like(_y, dtype=bool)
     peak_mask[all_detected_peaks] = True
 
     # Interpolate over detected peaks using neighbors that are not rejected
-    y_for_min = y.copy()
+    y_for_min = _y.copy()
     if np.any(peak_mask):
         not_peak = ~peak_mask
         # Use linear interpolation for peak regions
-        interp_vals = np.interp(x[peak_mask], x[not_peak], y[not_peak])
+        interp_vals = np.interp(x[peak_mask], x[not_peak], _y[not_peak])
         y_for_min[peak_mask] = interp_vals
 
     # Apply minimum filter (same size as y)
@@ -528,22 +551,22 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
     continuum_estimate = gaussian_filter1d(min_filtered, sigma=smooth)  # Smooth estimate
     
     # Line contamination score: how far above continuum estimate
-    line_contamination = y - continuum_estimate
+    line_contamination = _y - continuum_estimate
     line_contamination[line_contamination < 0] = 0  # make at least 0
     line_contamination /= np.max(line_contamination)
     # line_contamination = gaussian_filter1d(line_contamination, sigma=smooth)  # Smooth line contamination
     
     # Local variance-based detection (high variance = variable region)
-    local_variance = np.zeros_like(y)
-    for i in range(len(y)):
+    local_variance = np.zeros_like(_y)
+    for i in range(ylen):
         start = max(0, i - window_size//10)
-        end = min(len(y), i + window_size//10 + 1)
-        local_variance[i] = np.var(y[start:end])
+        end = min(ylen, i + window_size//10 + 1)
+        local_variance[i] = np.var(_y[start:end])
     # Variance penalty: high variance regions are less preferred
     smoothed_variance = gaussian_filter1d(local_variance, sigma=smooth)
     max_variance = np.max(smoothed_variance)
     variance_penalty = smoothed_variance / max_variance if max_variance > 0 else np.zeros_like(smoothed_variance)
-    print(f"Max variance: {max_variance:.2f}, Variance penalty range: {np.min(variance_penalty):.2f} - {np.max(variance_penalty):.2f}")
+    # print(f"Max variance: {max_variance:.2f}, Variance penalty range: {np.min(variance_penalty):.2f} - {np.max(variance_penalty):.2f}")
     
     # Combined continuum preference score (lower = better for knot placement)
     continuum_score = line_contamination + variance_penalty
@@ -563,47 +586,60 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
         else: 
             # Define search range around the knot
             search_radius = window_size  # Adaptive search radius
-            search_range = slice(max(0, int(knot)-search_radius), min(len(y), int(knot)+search_radius+1))
+            search_range = slice(max(0, int(knot)-search_radius), min(ylen, int(knot)+search_radius))
+            
             local_x = x[search_range]
-            # local_y = y[search_range]
+           
             local_score = continuum_score[search_range]
-            # Mask out regions around all detected peaks in this local area
-            mask = np.ones_like(local_score, dtype=bool)
-            for p in all_detected_peaks:
-                if search_range.start <= p < search_range.stop:
-                    local_peak_idx = p - search_range.start
-                    # Mask out around peaks
-                    mask_start = max(0, local_peak_idx - 1)
-                    mask_end = min(len(mask), local_peak_idx + 2)
-                    mask[mask_start:mask_end] = False
-            if np.any(mask):
-                # Find the position with minimum continuum score (best continuum location)
-                valid_scores = local_score[mask]
-                valid_x = local_x[mask]
-                # Choose position(s) with lowest contamination * variance penalty
-                min_score = np.min(valid_scores)
-                best_indices = np.where(valid_scores == min_score)[0]
-                if len(best_indices) == 1:
-                    best_idx = best_indices[0]
-                else:
-                    # If multiple, choose the one closest to the original knot
-                    distances = np.abs(valid_x[best_indices] - knot)
-                    best_idx = best_indices[np.argmin(distances)]
-                x_fit[i] = valid_x[best_idx]
+            min_score = np.min(local_score)
+            best_indices = np.where(local_score == min_score)[0]
+            if len(best_indices) == 1:
+                best_idx = best_indices[0]
             else:
-                print(f"Warning: Could not find good continuum region for knot at {knot:.1f}, moving to nearest non-peak.")
-                # Move to nearest non-peak in search range
-                non_peak_indices = np.where(mask)[0]
-                if len(non_peak_indices) > 0:
-                    nearest = local_x[mask][np.argmin(np.abs(local_x[mask] - knot))]
-                    x_fit[i] = nearest
-                else:
-                    # As a last resort, remove the knot at its current position
-                    x_fit[i] = np.nan
+                # If multiple, choose the one closest to the original knot
+                distances = np.abs(local_x[best_indices] - knot)
+                best_idx = best_indices[np.argmin(distances)]
+            x_fit[i+1] = local_x[best_idx]
+            # print(f"Moving knot {i+1} at {knot:.1f} within range {local_x.min()}-{local_x.max()}, from score {continuum_score[int(knot)]:.3f} to {local_score[best_idx]:.3f} at {local_x[best_idx]:.1f}.")
+            # Mask out regions around all detected peaks in this local area
+            # mask = np.ones_like(local_score, dtype=bool)
+            # for p in all_detected_peaks:
+            #     if search_range.start <= p < search_range.stop:
+            #         local_peak_idx = p - search_range.start
+            #         # Mask out around peaks
+            #         # mask_start = max(0, local_peak_idx - 1)
+            #         # mask_end = min(len(mask), local_peak_idx + 2)
+            #         # mask[mask_start:mask_end] = False
+            #         mask[local_peak_idx] = False
+            # if np.any(mask):
+            #     # Find the position with minimum continuum score (best continuum location)
+            #     valid_scores = local_score[mask]
+            #     valid_x = local_x[mask]
+            # Choose position(s) with lowest continuum score
+                # min_score = np.min(valid_scores)
+                # best_indices = np.where(valid_scores == min_score)[0]
+                # if len(best_indices) == 1:
+                #     best_idx = best_indices[0]
+                # else:
+                #     # If multiple, choose the one closest to the original knot
+                #     distances = np.abs(valid_x[best_indices] - knot)
+                #     best_idx = best_indices[np.argmin(distances)]
+                # x_fit[i] = valid_x[best_idx]
+            # else:
+            #     print(f"Warning: Could not find good continuum region for knot at {knot:.1f}, moving to nearest non-peak.")
+            #     # Move to nearest non-peak in search range
+            #     non_peak_indices = np.where(mask)[0]
+            #     if len(non_peak_indices) > 0:
+            #         nearest = local_x[mask][np.argmin(np.abs(local_x[mask] - knot))]
+            #         x_fit[i] = nearest
+            #     else:
+            #         # As a last resort, remove the knot at its current position
+            #         x_fit[i] = np.nan
     x_fit[0] = x.min()  # Ensure first knot is at start
     x_fit[-1] = x.max()  # Ensure last knot is at end
     continuum_score[int(x_fit[0])] = -1e-6  # Set first knot score to negative
     continuum_score[int(x_fit[-1])] = -1e-6  # Set last knot score to negative
+    # print(f"Knots after moving: {x_fit}")
 
     # Remove any knots marked as np.nan
     if np.any(np.isnan(x_fit)):
@@ -618,11 +654,11 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
     if np.any(x_fit < x.min()) or np.any(x_fit > x.max()):
         print("Clipping knots to valid range.")
         x_fit = np.clip(x_fit, x.min(), x.max())
-    x_fit = np.sort(x_fit)
+    # x_fit = np.sort(x_fit)
 
     # Drop knots that are too close together, keeping the one with lower continuum_score
     if node_distribution == 'chebyshev':
-        min_dist = smooth
+        min_dist = 2*smooth
     else:
         min_dist = max(10, window_size // 4)  # Minimum allowed distance between knots
     keep = np.ones(len(x_fit), dtype=bool)
@@ -646,9 +682,10 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
             i += 1
     x_fit = x_fit[keep]
     print(f"Final nknot after moving knots and dropping close pairs: {np.sum(keep)} out of {nknots}")
+    # print(f"Final knot positions: {x_fit} based on {keep}.")
     
     if norm_type == 'minimum':
-        y_fit = [np.min(y[int(max(0,_x-smooth)):int(min(len(x),_x+smooth+1))]) for _x in x_fit]  # Use local minima around knots
+        y_fit = [np.min(_y[int(max(0,_x-smooth)):int(min(len(x),_x+smooth+1))]) for _x in x_fit]  # Use local minima around knots
     elif norm_type == 'continuum':
         y_fit = continuum_estimate[x_fit.astype(int)]  # Use local continuum estimate for knot
     else:
@@ -657,6 +694,7 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
     boundary_width = window_size // 2
     y_fit[0] = np.median(continuum_estimate[:boundary_width])
     y_fit[-1] = np.median(continuum_estimate[-boundary_width:])
+    
     
     # spline = make_interp_spline(x_fit, y_fit, k=3, bc_type=([(1, 0.0)], [(1, 0.0)]))
     spline = make_interp_spline(x_fit, y_fit, k=3, bc_type=bc_type)
@@ -668,11 +706,11 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
         
         # Top panel: Peak detection analysis
         plt.subplot(4, 1, 1)
-        plt.plot(x, y, 'gray', alpha=0.7, label='Original')
-        plt.scatter(extended_peaks, y[extended_peaks], marker='x', c='red', s=15, alpha=0.8, label='Signal peaks', zorder=4)
+        plt.plot(x, _y, 'gray', alpha=0.7, label='Original')
+        plt.scatter(extended_peaks, _y[extended_peaks], marker='x', c='red', s=15, alpha=0.8, label='Signal peaks', zorder=4)
         plt.plot(x, continuum_estimate, 'blue', alpha=0.8, label='Continuum estimate')
         plt.xlim(x.min(), x.max())
-        plt.ylim(0, np.max(y) * 1.05)
+        plt.ylim(0, np.max(_y) * 1.05)
         plt.ylabel('Flux')
         plt.xlabel('Pixel')
         plt.legend()
@@ -697,8 +735,8 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
         
         # Third panel: Knot placement and fitting
         plt.subplot(4, 1, 3)
-        plt.plot(x, y, 'gray', alpha=0.5, label='Original')
-        plt.scatter(x[peak_mask], y[peak_mask], marker='x', c='red', s=1, label='Rejected (emission lines)')
+        plt.plot(x, _y, 'gray', alpha=0.5, label='Original')
+        plt.scatter(x[peak_mask], _y[peak_mask], marker='x', c='red', s=1, label='Rejected (emission lines)')
         plt.scatter(x_fit, y_fit, s=30, c='blue', edgecolor='white', linewidth=0.5, label='Knots', zorder=5)
         plt.plot(x, baseline, 'b-', linewidth=2, label='Baseline')
         plt.xlim(x.min(), x.max())
@@ -710,11 +748,10 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
         
         # Bottom panel: Normalized result
         plt.subplot(4, 1, 4)
-        plt.plot(x, y/baseline, 'b-', label='Normalised')
-        # plt.plot(x, y/continuum_estimate, 'g-', label='Naive Normalisation')
+        plt.plot(x, _y/baseline, 'b-', label='Normalised')
         plt.axhline(1, color='k', ls='--', alpha=0.5)
         plt.xlim(x.min(), x.max())
-        plt.ylim(-0.05, np.max(y/baseline) * 1.05)
+        plt.ylim(-0.05, np.max(_y/baseline) * 1.05)
         plt.ylabel('Normalised Flux')
         plt.xlabel('Pixel')
         plt.legend()
@@ -723,7 +760,7 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
         plt.tight_layout()
         plt.show()
     
-    return y/baseline
+    return _y/baseline
 
 def get_lines_in_order(wave, linelist, elements=None, intensity_threshold=None, flag=None):
     """
@@ -782,7 +819,9 @@ def plot_order_with_lines(wave, thxe_order, linelist, original_solution=None):
     plt.legend(unique.values(), unique.keys())
     plt.show()
 
-def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, plot=False):
+
+
+def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, offset=0, plot=False):
     """
     Fit spectral lines in a given order using a provided linelist and return the pixel and wavelength positions
     of successfully fitted lines.
@@ -851,23 +890,24 @@ def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, plot=False):
     lines_wave_positions = []
     for line in lines:
         line_wave = line['obs_wl_air(nm)']
-        idx = np.argmin(np.abs(wavelengths - line_wave))
+        idx = np.argmin(np.abs(wavelengths - line_wave)) + int(np.round(offset, 0))
         line_pixel = min_pixel + idx + (line_wave - wavelengths[idx])/(wavelengths[idx+1] - wavelengths[idx]) \
             if line_wave - wavelengths[idx] > 0 \
             else min_pixel + idx + (line_wave - wavelengths[idx])/(wavelengths[idx] - wavelengths[idx-1])
+        # line_pixel += offset
 
         fit_range = slice(max(0, idx-10), min(len(pixels), idx+11))
         x_fit = pixels[fit_range]
         y_fit = flux[fit_range]
 
-        peaks, _ = find_peaks(y_fit)
+        peaks, _ = find_peaks(y_fit, prominence=peak_height_threshold/2)
         if len(peaks) == 0:
             # print(f"No peaks found for line {line_wave:.3f} nm.")
             passed_mask.append(False)
             # lines_pixel_positions.append(np.nan)
             # lines_wave_positions.append(np.nan)
             continue
-        peak_idx = peaks[np.argmin(np.abs(x_fit[peaks] - (min_pixel + idx)))]
+        peak_idx = peaks[np.argmin(np.abs(x_fit[peaks] - line_pixel))]
         center = x_fit[peak_idx]
         if abs(center-line_pixel) > peak_position_threshold:
             # print(f"Peak {center} for line {line_wave:.3f} nm is too far from the guess pixel {line_pixel:.2f}.")
@@ -918,8 +958,8 @@ def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, plot=False):
 
         # print(f"Fitting line {line_wave:.3f} nm at pixel {line_pixel:.2f}, peak height {peak_height:.2f}, floor {line_floor:.2f}")
 
-        p0 = [y_fit[peak_idx], line_pixel, 2, 2, line_floor]
-        bounds = ([0.9*y_fit[peak_idx], line_pixel-3, 1e-3, 1e-3, 0], [2*y_fit[peak_idx], line_pixel+3, 10, 10, np.max(y_fit)])
+        p0 = [peak_height, center, 2, 2, line_floor]
+        bounds = ([0.9*peak_height, center-3, 1e-3, 1e-3, 0], [2*peak_height, center+3, 10, 10, np.max(y_fit)])
         try:
             popt, _ = curve_fit(general_gaussian, x_fit_masked, y_fit_masked, p0=p0, bounds=bounds)
             if plot:
@@ -956,15 +996,16 @@ def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, plot=False):
     # passed_mask[~unique_indices] = False  # Mark duplicates as not passed
     # Filter out lines that did not pass the selection criteria
     # print(f"Total lines passed: {np.sum(passed_mask)} out of {len(lines)}")
-    # lines = np.array(lines)
-    # lines = lines[passed_mask]
+    lines = np.array(lines)
+    lines = lines[passed_mask]
     # # Keep only unique pixel positions and corresponding wavelengths
     # lines_wave_positions = lines_wave_positions[passed_mask]
     # lines_pixel_positions = lines_pixel_positions[passed_mask]
+    print(f"Total lines fitted: {len(lines_pixel_positions)}")
     
     return lines_pixel_positions, lines_wave_positions, lines
 
-def fit_all_lines_per_order(wave, extracted_ThXe, ORDER, traces, linelist, arm, veloce_paths, plot=False):
+def fit_all_lines_per_order(wave, norm_extracted_Th, ORDER, traces, linelist, arm, offset=0, veloce_paths=None, plot=False):
     """
     Fits spectral lines for each order and returns their pixel, wavelength, and order positions.
     Parameters
@@ -1001,21 +1042,15 @@ def fit_all_lines_per_order(wave, extracted_ThXe, ORDER, traces, linelist, arm, 
     #TODO: save fitted lines to file
     pixel_positions, wave_positions, order_positions = [], [], []
     # fitted_lines = []
-    if arm =='blue':
-        nknots=13
-    elif arm == 'green':
-        nknots=15
-    elif arm == 'red':
-        nknots=17
+    
         
     for order, absolute_order in enumerate(ORDER):
         print(f"Fitting lines in order {absolute_order} ({order+1}/{len(ORDER)})")
         lines_pixel_positions, lines_wave_positions, _fitted_lines = fit_lines_in_order(
             wave[order],
-            # extracted_ThXe[order],
-            normalise_ArcTh_order_with_spline(extracted_ThXe[order], nknots=nknots),
+            norm_extracted_Th[order],
             traces.y[order],
-            linelist, arm)
+            linelist, arm, offset=offset)
         lines_order_positions = np.ones_like(lines_pixel_positions) * absolute_order
         pixel_positions.append(lines_pixel_positions)
         wave_positions.append(lines_wave_positions)
@@ -1028,10 +1063,10 @@ def fit_all_lines_per_order(wave, extracted_ThXe, ORDER, traces, linelist, arm, 
 
     return pixel_positions, wave_positions, order_positions
 
-def get_pixels_for_ArcTh_fit(extracted_ThXe, traces):
+def get_pixels_for_ArcTh_fit(orders, traces):
     max_extracted_pixel = max([max(trace_y) for trace_y in traces.y])
     min_extracted_pixel = min([min(trace_y) for trace_y in traces.y])
-    full_pixels = np.array([np.arange(min_extracted_pixel, max_extracted_pixel + 1) for _ in range(len(extracted_ThXe))])
+    full_pixels = np.array([np.arange(min_extracted_pixel, max_extracted_pixel + 1) for _ in orders])
     return full_pixels
 
 def apply_n_limit_constraint(initial_mask, orders_position, y_fit, X, model, n_limit, all_idx, residuals):
@@ -1180,7 +1215,9 @@ def get_arcTh_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, fil
         arcTh_master_filename = os.path.join(veloce_paths.master_dir, f"master_ARC-ThAr_{arm}_{date}.fits")
 
     if os.path.exists(arcTh_master_filename):
-        arcTh_image = fits.getdata(arcTh_master_filename)
+        with fits.open(arcTh_master_filename) as hdul:
+            arcTh_image = hdul[0].data
+            hdr = hdul[0].header
     else:
         if obs_list is not None:
             file_list = obs_list[f'ARC-ThAr_{arm}'][date]
@@ -1193,33 +1230,61 @@ def get_arcTh_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, fil
                 raise FileNotFoundError(f"No ARC-ThAr_{arm} files found for date {date}. Cannot create master.")
         else:
             raise ValueError("Either obs_list or filename must be provided to get the arcTh master.")
-    return arcTh_image
+    return arcTh_image, hdr
 
 # def calibrate_absolute_Th(extracted_science_orders, obs_list, veloce_paths, traces, thxe_image, hdr, arm, plot=False, filename=None):
 def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_mode, plot=False, plot_filename=None, th_linelist_filename='Default'):
-    
-    wave_solution_filename = f"arcTh_wave_{arm}_{date}.pkl"
+    ### TODOL add header info to wavelength solution file, including params used, save fitted lines to file
+    wave_solution_filename = f"arcTh_wave_{arm}_{date}.fits"
     if os.path.exists(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename)):
         print(f"Reading existing wavelength solution file {wave_solution_filename}")
-        wave = pickle.load(open(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename), 'rb'))
+        # wave = pickle.load(open(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename), 'rb'))
+        wave, _, _ = veloce_reduction_tools.load_extracted_spectrum_fits(
+            os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename))
     else:
         print(f"Building new wavelength solution based on arc Th lines for {arm} arm on {date}")
         
-        arcTh_image = get_arcTh_master(veloce_paths, arm, date, amplifier_mode, obs_list=obs_list, filename=None)
+        arcTh_image, hdr = get_arcTh_master(veloce_paths, arm, date, amplifier_mode, obs_list=obs_list, filename=None)
 
         ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = veloce_reduction_tools.load_prefitted_wave(
             arm=arm, wave_path=veloce_paths.wave_dir)
-        static_wave = veloce_reduction_tools.calibrate_orders_to_wave(ORDER, Y0, COEFFS, traces) # vacuum
-        static_wave = [veloce_reduction_tools.vacuum_to_air(static_wave[i]) for i in range(len(static_wave))] # air
+        # static_wave = veloce_reduction_tools.calibrate_orders_to_wave(ORDER, Y0, COEFFS, traces) # vacuum
+        # static_wave = [veloce_reduction_tools.vacuum_to_air(static_wave[i]) for i in range(len(static_wave))] # air
         # static_wave = load_static_Th_wavelength_solution(arm, veloce_paths, traces) # air
+        static_wave, ref_arcTh, _ = veloce_reduction_tools.load_extracted_spectrum_fits(
+            os.path.join(veloce_paths.wave_dir, f"arcTh_wave_{arm}_230828.fits"))
+        static_wave = [order_wave[np.isfinite(order_wave)] for order_wave in static_wave]
+        ref_arcTh = [th_order[np.isfinite(th_order)] for th_order in ref_arcTh]
 
         linelist = load_Th_linelist(veloce_paths, filename=th_linelist_filename, linelist_type='NIST')
 
         extracted_arcTh, _ = veloce_reduction_tools.extract_orders_with_trace(arcTh_image, traces)
+
+        if arm =='blue':
+            nknots=13
+        elif arm == 'green':
+            nknots=15
+        elif arm == 'red':
+            nknots=17
+        extracted_arcTh = [normalise_ArcTh_order_with_spline(extracted_arcTh_order, nknots=nknots) for extracted_arcTh_order in extracted_arcTh]
+        ref_arcTh = [normalise_ArcTh_order_with_spline(ref_arcTh_order, nknots=nknots) for ref_arcTh_order in ref_arcTh]
+
+        # TODO: add trace.y (pixels in dispersion) to saved fits to have an information on the extracted pixel positions???
+        _, _, offsets = calculate_offset_map(np.array(ORDER), ref_arcTh, traces.y, extracted_arcTh, traces.y, 8, mode='Th')
+        print(f"Median offset between reference and current arcTh: {np.nanmedian(offsets):.2f} [pixel].")
+        if np.nanstd(offsets) > 1.0:
+            print(f"[Warning]: Large scatter of offsets found between reference and current arcTh ({np.nanstd(offsets):.2f} [pixel]).")
+
         pixel_positions, wave_positions, order_positions = fit_all_lines_per_order(
-            static_wave, extracted_arcTh, ORDER, traces, linelist, arm, veloce_paths, plot=False)
+            static_wave, extracted_arcTh, ORDER, traces, linelist, arm, offset=np.nanmedian(offsets), plot=False)
         
-        full_pixels = get_pixels_for_ArcTh_fit(extracted_arcTh, traces)
+        if len(np.unique(order_positions)) != len(ORDER):
+            print(f"[Warning]: {len(np.unique(order_positions)) - len(ORDER)} order(s) don't have fitted lines.")
+            missing_orders = [order for order in ORDER if order not in np.unique(order_positions)]
+            print(f"Missing orders: {missing_orders}")
+            
+        full_pixels = get_pixels_for_ArcTh_fit(np.unique(order_positions), traces)
+
         warnings.filterwarnings("ignore", category=LinAlgWarning)
         if arm == 'blue':
             Z, residuals, mask, model, converged = fit_surface_sklearn(
@@ -1228,7 +1293,10 @@ def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_m
         elif arm == 'green':
             Z, residuals, mask, model, converged = fit_surface_sklearn(
                 pixel_positions, order_positions, wave_positions,
-                full_pixels, degree=7, sigma_clip=2.2, robust=False, n_limit=9)
+                full_pixels, degree=7, sigma_clip=2.4, robust=False, n_limit=9)
+            # Z, residuals, mask, model, converged = fit_surface_sklearn(
+            #     pixel_positions, order_positions, wave_positions,
+            #     full_pixels, degree=7, sigma_clip=2.2, robust=False, n_limit=9)
         elif arm == 'red':
             Z, residuals, mask, model, converged = fit_surface_sklearn(
                 pixel_positions, order_positions, wave_positions,
@@ -1243,10 +1311,16 @@ def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_m
         if plot:
             veloce_diagnostic.plot_ArcTh_surface(Z, pixel_positions, order_positions, wave_positions, full_pixels, veloce_paths, plot_filename)
             veloce_diagnostic.plot_ArcTh_points_positions(pixel_positions, order_positions, mask, veloce_paths, plot_filename)
-            veloce_diagnostic.plot_ArcTh_residuals(residuals, order_positions, pixel_positions, wave_positions, mask, veloce_paths, plot_filename, plot_type='velocity')
+            veloce_diagnostic.plot_ArcTh_residuals(residuals, order_positions, pixel_positions, wave_positions, mask, veloce_paths, plot_filename, plot_type='wavelength')
         
-        with open(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename), 'wb') as f:
-            pickle.dump(wave, f)
+        # with open(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename), 'wb') as f:
+        #     pickle.dump(wave, f)
+
+        veloce_reduction_tools.save_extracted_spectrum_fits(
+            os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename),
+            wave,
+            extracted_arcTh,
+            hdr)
     
     return wave #, extracted_science_orders
 
