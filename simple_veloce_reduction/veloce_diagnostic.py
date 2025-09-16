@@ -199,19 +199,24 @@ def plot_scattered_light(frame, background, corrected_frame, veloce_paths, filen
     return background_message, output_file
 
 def plot_ccf(PIX, CCF, order, chunk, fit_lc_peak, general_gaussian, veloce_paths=None, filename=None, show=False):
-    fitting_limit = np.ceil(np.mean(np.diff(find_peaks(CCF[order-1][chunk])[0])))/2 + 1
+    # fitting_limit = np.ceil(np.mean(np.diff(find_peaks(CCF[order-1][chunk])[0])))/2 + 1
+    shift, popt, fit_lim = fit_lc_peak(PIX[order-1][chunk], CCF[order-1][chunk])
     plt.figure(figsize=(10, 6))
     plt.title('Cross-Correlation Function')
-    plt.plot(PIX[order-1][chunk], CCF[order-1][chunk], label=f'Order {order}')
-    shift, popt = fit_lc_peak(PIX[order-1][chunk], CCF[order-1][chunk])
+    pixel = PIX[order-1][chunk]
+    ccf = CCF[order-1][chunk]
+    ccf_mask = np.isfinite(ccf)
+    pixel = pixel[ccf_mask]#[fit_slice]
+    ccf = ccf[ccf_mask]#[fit_slice]
+    plt.plot(pixel, ccf, label=f'Order {order}')
     print(f"Amplitude: {popt[0]}\n Shift: {popt[1]}\n Sigma: {popt[2]}\n Beta: {popt[3]}\n Baseline: {popt[4]}")
-    subpixel = np.arange(np.min(PIX[order-1][chunk]), np.max(PIX[order-1][chunk]), 0.01)
+    subpixel = np.arange(np.min(pixel), np.max(pixel), 0.01)
     plt.plot(subpixel, general_gaussian(subpixel, *popt), label='Gaussian Fit', linestyle='--')
     plt.axvline(shift, color='r', linestyle='--', label='Peak Position')
     plt.title(f'Cross-Correlation Function for Order {order}, Shift = {popt[1]:.2f}')
     plt.xlabel('Pixel Shift')
     plt.ylabel('Cross-Correlation')
-    plt.xlim(-1*fitting_limit, fitting_limit)
+    plt.xlim(shift-fit_lim, shift+fit_lim)
     plt.legend()
     plt.grid()
     plt.tight_layout()
@@ -316,6 +321,8 @@ def plot_ArcTh_points_positions(pixel_positions, order_positions, mask, veloce_p
     ax.set_xlabel('Order number')
     ax.set_ylabel('Echelle Dispersion [pixel]')
     ax.set_title(f'Points used for fitting (X,Y): kept {np.sum(mask)} out of {len(mask)}')
+    # Force x-ticks to be integers only
+    ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
     # Shrink the box and move legend outside the plot
     box = ax.get_position()
     ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])

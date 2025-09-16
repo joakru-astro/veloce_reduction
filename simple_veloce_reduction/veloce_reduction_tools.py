@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import median_filter, label, find_objects, zoom
 from scipy.interpolate import RBFInterpolator
+from scipy.signal import find_peaks
 from csaps import csaps
 from astropy.io.fits import PrimaryHDU
 
@@ -32,7 +33,7 @@ class Traces:
       set_wavelength_slice(start, stop):
       save_traces(arm=None, amp_mode=None, trace_dir=None, filename=None):
         Saves the traces to a file.
-      refit_traces(frame, fit_width=35, max_iterations=100, tolerance=1e-3, poly_order=5):
+      refit_traces(frame, fit_width=35, maxfrom scipy.signal import find_peaks_iterations=100, tolerance=1e-3, poly_order=5):
       adjust_traces(frame, fit_width=35, max_iterations=100, tolerance=1e-3):
         Refines the trace positions in a given image (frame) by iteratively adjusting the trace positions.
       load_traces(filename):
@@ -116,6 +117,17 @@ class Traces:
         """
         self.summing_ranges_lower = [summing_range[0] for summing_range in summing_ranges]
         self.summing_ranges_upper = [summing_range[1] for summing_range in summing_ranges]
+
+    def set_absolute_order(self, orders):
+        """
+        Sets the absolute order numbers for the traces.
+        
+        Parameters:
+        - orders (list of int): The absolute order numbers corresponding to each trace.
+        """
+        if len(orders) != len(self.traces):
+            raise ValueError("The length of orders must match the number of traces.")
+        self.orders = orders
 
     def set_wave_calib_slice(self, start, stop):
         """
@@ -290,6 +302,123 @@ class Traces:
         # traces = np.array(sorted(traces, key=lambda x: x[len(x)//2]))
         self.x = _traces
         self.traces = [np.array([y, x]) for y, x in zip(self.y, self.x)]
+    
+    @staticmethod
+    def determine_trace_shift(frame, reference_frame=None, arm=None, row=None):
+        if reference_frame is None and arm is not None:
+            # TODO: use master flat from CSV
+            veloce_paths = veloce_config.VelocePaths()
+            reference_filename = os.path.join(veloce_paths.reduction_parent_dir,
+                                              'Master', f'master_flat_{arm}_230828.fits')
+            with fits.open(reference_filename) as hdul:
+                reference_frame = hdul[0].data
+                # header = hdul[0].header
+        elif reference_frame is None and arm is None:
+            raise ValueError('Please provide either a reference frame or arm name to load the master flat.')
+        pix_shift = np.arange(-1*frame.shape[1]+1, frame.shape[1], 1)
+        _shifts = []
+        if row is None:
+            ccf = np.zeros((frame.shape[0], frame.shape[1]*2-1))
+            for row in range(300, frame.shape[0]-300, 50):  # avoid edges
+                if np.std(frame[row,:]) > 500:  # only do cross-correlation for rows with signal
+                    ccf[row] = np.correlate(frame[row,:], reference_frame[row,:], mode='full')
+                    _shifts.append(pix_shift[np.argmax(ccf[row])])
+                    # _shifts.append(fit_ccf_peak(pix_shift, ccf[row], fitting_limit=7)[0])
+            # shift = mode(_shifts)[0]
+            shift = np.nanmedian(_shifts)
+        else:
+            if np.std(frame[row,:]) > 500:
+                ccf = np.correlate(frame[row,:], reference_frame[row,:], mode='full')
+                # shift = fit_ccf_peak(pix_shift, ccf, fitting_limit=7)[0]
+                shift = pix_shift[np.argmax(ccf)]
+            else:
+                print(f'Row {row} has no signal')
+                return np.nan, [np.nan], [np.nan]
+        
+        return shift, pix_shift, ccf
+    
+    @staticmethod
+    def determine_summing_range(image, traces, search_box=50, plot=False, peak_mode='closest'):
+        lower, upper = [], []
+        if plot:
+            print(f'Plotting trace extraction for order {plot}')
+        if plot == True:
+            plot = 10
+        for idx, (trace_y, trace_x, _, _) in enumerate(traces):
+            minima_l = []
+            minima_r = []
+            for row, x in zip(trace_y, trace_x):
+                lower_bound = int(max(0, x - search_box))
+                center = int(search_box) if x - search_box >= 0 else int(x)
+                upper_bound = int(min(image.shape[1], x + search_box))
+                row_data = image[int(row), lower_bound:upper_bound].copy()
+                row_data -= np.max(row_data)
+                row_data *= -1
+                _height = np.median(row_data) + (np.max(row_data) - np.median(row_data))/2
+                # _height = np.max(row_data)/2
+                peaks, _ = find_peaks(row_data, height=_height, distance=3)
+                # peaks = np.where(row_data > _height)[0]
+
+                peaks_l = peaks[peaks < center]
+                peaks_r = peaks[peaks > center]
+
+                # Select peak based on peak_mode
+                if len(peaks_l) > 0:
+                    if peak_mode == 'closest':
+                        closest_peak = peaks_l[np.argmin(np.abs(peaks_l - center))]
+                        minima_l.append(center - closest_peak)
+                    elif peak_mode == '2nd' and len(peaks_l) > 1:
+                        sorted_l = np.argsort(np.abs(peaks_l - center))
+                        second_peak = peaks_l[sorted_l[1]]
+                        minima_l.append(center - second_peak)
+                    else:
+                        minima_l.append(np.nan)
+                else:
+                    minima_l.append(np.nan)
+
+                if len(peaks_r) > 0:
+                    if peak_mode == 'closest':
+                        closest_peak = peaks_r[np.argmin(np.abs(peaks_r - center))]
+                        minima_r.append(closest_peak - center)
+                    elif peak_mode == '2nd' and len(peaks_r) > 1:
+                        sorted_r = np.argsort(np.abs(peaks_r - center))
+                        second_peak = peaks_r[sorted_r[1]]
+                        minima_r.append(second_peak - center)
+                    else:
+                        minima_r.append(np.nan)
+                else:
+                    minima_r.append(np.nan)
+
+                if idx == plot and row == 2000:
+                    plt.close('all')
+                    plt.figure()
+                    plt.plot(row_data, 'k-')
+                    plt.plot(peaks, row_data[peaks], "x")
+                    plt.axvline(center, color='r', linestyle='--', label='Trace Center')
+                    if minima_l[-1] is not np.nan:
+                        plt.axvline(center - minima_l[-1], color='g', linestyle='--', label='Left Minimum')
+                    if minima_r[-1] is not np.nan:
+                        plt.axvline(center + minima_r[-1], color='b', linestyle='--', label='Right Minimum')
+                    plt.xlabel('Pixel')
+                    plt.ylabel('Counts')
+                    plt.title(f'Row {row}, Order {idx}')
+                    plt.legend()
+                    plt.show()
+            lower.append(int(np.nanmedian(minima_l))+1)
+            upper.append(int(np.nanmedian(minima_r))+1)
+        if len(lower) != len(traces):
+            print(f'Warning: found {len(lower)} summing ranges, but {len(traces)} traces')
+        return np.array(lower), np.array(upper)
+    
+    def adjust_traces_with_ccf(self, frame, arm):
+        shift, pix_shift, ccf = self.determine_trace_shift(frame, arm=arm, row=None)
+        self.x = [np.array(x) + shift for x in self.x]
+        self.traces = [np.array([y, x]) for y, x in zip(self.y, self.x)]
+
+    def find_summing_ranges(self, image, search_box=50, plot=False, peak_mode='closest'):
+        lower, upper = self.determine_summing_range(image, self, search_box=search_box, plot=plot, peak_mode=peak_mode)
+        self.summing_ranges_lower = lower
+        self.summing_ranges_upper = upper
 
     @classmethod
     def load_traces(cls, filename):

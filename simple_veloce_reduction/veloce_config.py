@@ -27,21 +27,22 @@ class VelocePaths:
         self.wave_dir = os.path.join(self.reduction_parent_dir, 'Wave')
         self.trace_dir = os.path.join(self.reduction_parent_dir, 'Trace')
         
-        self.intermediate_dir = os.path.join(self.output_dir, 'Intermediate_results')
-        if not os.path.exists(self.intermediate_dir):
-            os.makedirs(self.intermediate_dir)
-        self.master_dir = os.path.join(self.intermediate_dir, 'Master')
-        if not os.path.exists(self.master_dir):
-            os.makedirs(self.master_dir)
-        self.plot_dir = os.path.join(self.intermediate_dir, 'Plots')
-        if not os.path.exists(self.plot_dir):
-            os.makedirs(self.plot_dir)
-        self.trace_shift_dir = os.path.join(self.intermediate_dir, 'Trace_shifts')
-        if not os.path.exists(self.trace_shift_dir):
-            os.makedirs(self.trace_shift_dir)
-        self.wavelength_calibration_dir = os.path.join(self.intermediate_dir, 'Wavelength_calibration')
-        if not os.path.exists(self.wavelength_calibration_dir):
-            os.makedirs(self.wavelength_calibration_dir)
+        if output_dir is not None:
+            self.intermediate_dir = os.path.join(self.output_dir, 'Intermediate_results')
+            if not os.path.exists(self.intermediate_dir):
+                os.makedirs(self.intermediate_dir)
+            self.master_dir = os.path.join(self.intermediate_dir, 'Master')
+            if not os.path.exists(self.master_dir):
+                os.makedirs(self.master_dir)
+            self.plot_dir = os.path.join(self.intermediate_dir, 'Plots')
+            if not os.path.exists(self.plot_dir):
+                os.makedirs(self.plot_dir)
+            self.trace_shift_dir = os.path.join(self.intermediate_dir, 'Trace_shifts')
+            if not os.path.exists(self.trace_shift_dir):
+                os.makedirs(self.trace_shift_dir)
+            self.wavelength_calibration_dir = os.path.join(self.intermediate_dir, 'Wavelength_calibration')
+            if not os.path.exists(self.wavelength_calibration_dir):
+                os.makedirs(self.wavelength_calibration_dir)
 
     @classmethod
     def from_config(cls, config):

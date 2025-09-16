@@ -67,14 +67,17 @@ def get_flat(veloce_paths, arm, amplifier_mode, date, obs_list):
         with fits.open(master_flat_filename) as hdul:
             master_flat = hdul[0].data
             hdr = hdul[0].header
+        norm_flat = veloce_reduction_tools.normalise_flat(master_flat, hdr)
     else:
+        file_list = obs_list[f'flat_{arm}'][date]
+        file_list = veloce_reduction_tools.get_longest_consecutive_files(file_list)
         master_flat, hdr = veloce_reduction_tools.get_master_mmap(
-            obs_list, f"flat_{arm}", veloce_paths.input_dir,
+            file_list, f"flat_{arm}", veloce_paths.input_dir,
             date, arm, amplifier_mode)
-        master_flat, hdr = veloce_reduction_tools.normalise_flat(master_flat, hdr)
+        norm_flat, hdr = veloce_reduction_tools.normalise_flat(master_flat, hdr)
         veloce_reduction_tools.save_image_fits(master_flat_filename, master_flat, hdr)
 
-    return master_flat
+    return master_flat, norm_flat
 
 def extract_run(target_list, config, veloce_paths, obs_list):
     """
@@ -117,6 +120,7 @@ def extract_run(target_list, config, veloce_paths, obs_list):
         ### load traces
         traces = load_trace_data(arm, veloce_paths.trace_dir, sim_calib=config['sim_calib'], filename=config['trace_file'])
         
+        
         if config['calib_type'] == 'Static':
             ### load static wave calibration based on ThAr
             ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
@@ -129,8 +133,9 @@ def extract_run(target_list, config, veloce_paths, obs_list):
             pass # load LC?
 
         for date in target_list.keys(): 
-            if config['flat_field']:
-                flat = get_flat(config, veloce_paths, arm, config['amplifier_mode'], date, obs_list)
+            # if config['flat_field']:
+            flat, norm_flat = get_flat(config, veloce_paths, arm, config['amplifier_mode'], date, obs_list)
+            traces.adjust_traces_with_ccf(flat, arm)
 
             if config['calib_type'] == 'arcTh':
                 arcTh_wave = veloce_wavecalib.calibrate_absolute_Th(traces, veloce_paths, obs_list,
@@ -151,7 +156,7 @@ def extract_run(target_list, config, veloce_paths, obs_list):
                             image_data, hdr, arm, config['amplifier_mode'], overscan_range=32)
                         
                         if config['flat_field']:
-                            image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, flat, hdr)
+                            image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, norm_flat, hdr)
                         
                         if config['scattered_light']:
                             image_subtracted_bias, hdr = remove_scattered_light(image_subtracted_bias, hdr, traces)
@@ -237,9 +242,14 @@ def extract_night(target_list, config, veloce_paths, obs_list):
     
     for arm in arms:
         print(arm)
+        date = config['date']
         ccd = data_dirs[arm]
         ### load traces
         traces = load_trace_data(arm, veloce_paths.trace_dir, sim_calib=config['sim_calib'], filename=config['trace_file'])
+        
+        # if config['flat_field']:
+        flat, norm_flat = get_flat(config, veloce_paths, arm, config['amplifier_mode'], date, obs_list)
+        traces.adjust_traces_with_ccf(flat, arm)
 
         if config['calib_type'] == 'Static':
             # load wave calibration based on ThAr
@@ -251,10 +261,6 @@ def extract_night(target_list, config, veloce_paths, obs_list):
         #     wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation()
         else:
             pass
-
-        date = config['date']
-        if config['flat_field']:
-            flat = get_flat(config, veloce_paths, arm, config['amplifier_mode'], date, obs_list)
 
         if config['calib_type'] == 'arcTh':
             arcTh_wave = veloce_wavecalib.calibrate_absolute_Th(traces, veloce_paths, obs_list,
@@ -275,7 +281,7 @@ def extract_night(target_list, config, veloce_paths, obs_list):
                             image_data, hdr, arm, config['amplifier_mode'], overscan_range=32)
                     
                     if config['flat_field']:
-                        image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, flat, hdr)
+                        image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, norm_flat, hdr)
 
                     if config['scattered_light']:
                         image_subtracted_bias, hdr = remove_scattered_light(image_subtracted_bias, hdr, traces)
@@ -356,6 +362,9 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
         ccd = data_dirs[arm]
         ### load traces
         traces = load_trace_data(arm, veloce_paths.trace_dir, sim_calib=config['sim_calib'], filename=config['trace_file'])
+        flat, norm_flat = get_flat(config, veloce_paths, arm, config['amplifier_mode'], config['date'], obs_list)
+        traces.adjust_traces_with_ccf(flat, arm)
+
         # if sim_calib:
         #     # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
         #     filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
@@ -393,8 +402,7 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
                             image_data, hdr, arm, config['amplifier_mode'], overscan_range=32)
                 
                 if config['flat_field']:
-                    flat = get_flat(config, veloce_paths, arm, config['amplifier_mode'], config['date'], obs_list)
-                    image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, flat, hdr)
+                    image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, norm_flat, hdr)
                 
                 if config['scattered_light']:
                     image_subtracted_bias, hdr = remove_scattered_light(image_subtracted_bias, hdr, traces)

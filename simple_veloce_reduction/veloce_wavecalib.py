@@ -65,13 +65,14 @@ def load_LC_wave_reference(veloce_paths, arm):
 
     return ref_orders, ref_wave, ref_intensity, ref_pixel
 
-def load_simultanous_LC(image, veloce_paths, hdr, arm, ref_orders=None, ref_pixel=None):
+def load_simultanous_LC(image, veloce_paths, hdr, arm, traces=None, ref_orders=None, ref_pixel=None):
     """
     Load simultaneous laser comb observations.
     """
     if hdr is not None and (hdr['FREQREF'] != REPETITION_RATE and hdr['FOFFFREQ'] != OFFSET_FREQUENCY):
         raise ValueError("Repetition rate and offset frequency do not match the values of LC solution.")
-    traces = veloce_reduction_tools.Traces.load_traces(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_LC_trace.pkl'))
+    if traces is None:
+        traces = veloce_reduction_tools.Traces.load_traces(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_LC_trace.pkl'))
     
     extracted_LC, extracted_LC_imgs = veloce_reduction_tools.extract_orders_with_trace(image, traces)
 
@@ -119,19 +120,30 @@ def general_gaussian(x, A, mu, sigma, beta, baseline):
     return A * np.exp(-np.abs(((x - mu)/(np.sqrt(2)*sigma)))**beta) + baseline
 
 def fit_lc_peak(pix_shift, ccf, fitting_limit=None):
-    # pix_shift = pix_shift[~np.isnan(pix_shift)]
-    ccf = ccf[~np.isnan(ccf)]
-    
+    ccf_mask = np.isfinite(ccf)
     # if len(pix_shift) == 0 or len(ccf) == 0:
-    if len(ccf) == 0:
-        return np.nan, [np.nan]
+    if np.sum(ccf_mask) < 10:
+        return np.nan, [np.nan], np.nan #slice(0,None)
+    else:
+        print(pix_shift.shape, ccf.shape, ccf_mask.shape)
+        pix_shift = pix_shift[ccf_mask]
+        ccf = ccf[ccf_mask]
     
     # consider peak near 0 pixel shift
+    peaks, _ = find_peaks(ccf)
     if fitting_limit is None:
-        fitting_limit = np.ceil(np.mean(np.diff(signal.find_peaks(ccf)[0])))/2 + 1
+        fitting_limit = np.ceil(np.mean(np.diff(peaks)))/2+1
         print(f"[Info] Fitting limit for LC peak fitting set to {fitting_limit:.2f} pixel.")
-    _pix_shift = pix_shift[abs(pix_shift) <= fitting_limit]
-    _ccf = ccf[abs(pix_shift) <= fitting_limit]
+    center_peak_shift = np.min(abs(pix_shift[peaks]))
+    center_peak_idx = np.argmin(abs(pix_shift - center_peak_shift))
+    print(f"[Info] Closest peak to origin at {center_peak_shift} pixel shift (index {center_peak_idx}).")
+    if ccf[center_peak_idx] != np.max(ccf):
+        print(f"[Warning] Closest peak to origin (at {center_peak_shift}) is not the highest peak (at {pix_shift[np.argmax(ccf)]}).")
+    fitting_slice = slice(max(0, int(center_peak_idx-fitting_limit+0.5)), min(len(ccf), int(center_peak_idx+fitting_limit+1.5)))
+    _pix_shift = pix_shift[fitting_slice]
+    # _pix_shift = pix_shift[abs(pix_shift) <= fitting_limit]
+    _ccf = ccf[fitting_slice]
+    # _ccf = ccf[abs(pix_shift) <= fitting_limit]
     # _ccf -= np.min(_ccf)
 
     # fit a generalised gaussian to the peak
@@ -145,10 +157,10 @@ def fit_lc_peak(pix_shift, ccf, fitting_limit=None):
         popt, _ = curve_fit(general_gaussian, _pix_shift, _ccf,
                         p0=[peak, peak_position, sigma, beta, baseline],
                         bounds=([0, np.min(_pix_shift), 1e-3, 1e-3, 0], [2*peak, np.max(_pix_shift), 10, 10, peak]),)
-        return popt[1], popt
+        return popt[1], popt, fitting_limit #fitting_slice
     except Exception as e:
         print(f"[Warning] LC peak fitting failed: {e}")
-        return np.nan, [np.nan]
+        return np.nan, [np.nan], np.nan #slice(0,None)
 
 def calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_pixel, number_of_parts=8, mode='LC', plot=False, veloce_paths=None, filename=None):
     """
@@ -326,13 +338,13 @@ def apply_wavelength_shift(wave, arm, veloce_paths):
         wave[i] *= convert
     return wave
 
-def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, plot=False, filename=None):
+def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, traces=None, plot=False, filename=None):
     if arm == 'blue':
         raise NotImplementedError("Blue arm is not supported for LC calibration.")
         # print("[warning] Blue arm is not supported for LC calibration.")
         # return np.array([None]), np.array([None])
     ref_orders, ref_wave, ref_intensity, ref_pixel = load_LC_wave_reference(veloce_paths, arm)
-    lc_intensity, lc_pixel, order_slice, pixel_slices = load_simultanous_LC(lc_image, veloce_paths, hdr, arm, ref_orders=ref_orders, ref_pixel=ref_pixel)
+    lc_intensity, lc_pixel, order_slice, pixel_slices = load_simultanous_LC(lc_image, veloce_paths, hdr, arm, traces=traces, ref_orders=ref_orders, ref_pixel=ref_pixel)
     # align extracted orders with calibrated orders and pixel ranges
     extracted_science_orders = extracted_science_orders[order_slice]
     extracted_science_orders = [order[pixel_slices[i]] for i, order in enumerate(extracted_science_orders)]
@@ -360,7 +372,7 @@ def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, 
     wave = interpolate_offsets_optimised(lc_pixel, surface_points, ref_wave, ref_pixel)
     
     # apply shift between calibration fiber and science fibers expressed as rv
-    wave = apply_wavelength_shift(wave, arm, veloce_paths)
+    # wave = apply_wavelength_shift(wave, arm, veloce_paths)
 
     return wave,  extracted_science_orders
 
