@@ -125,7 +125,6 @@ def fit_lc_peak(pix_shift, ccf, fitting_limit=None):
     if np.sum(ccf_mask) < 10:
         return np.nan, [np.nan], np.nan #slice(0,None)
     else:
-        print(pix_shift.shape, ccf.shape, ccf_mask.shape)
         pix_shift = pix_shift[ccf_mask]
         ccf = ccf[ccf_mask]
     
@@ -133,13 +132,17 @@ def fit_lc_peak(pix_shift, ccf, fitting_limit=None):
     peaks, _ = find_peaks(ccf)
     if fitting_limit is None:
         fitting_limit = np.ceil(np.mean(np.diff(peaks)))/2+1
-        print(f"[Info] Fitting limit for LC peak fitting set to {fitting_limit:.2f} pixel.")
-    center_peak_shift = np.min(abs(pix_shift[peaks]))
-    center_peak_idx = np.argmin(abs(pix_shift - center_peak_shift))
-    print(f"[Info] Closest peak to origin at {center_peak_shift} pixel shift (index {center_peak_idx}).")
+        # print(f"[Info] Fitting limit for LC peak fitting set to {fitting_limit:.2f} pixel.")
+    # center_peak_shift = np.min(abs(pix_shift[peaks]))
+    # center_peak_idx = np.argmin(abs(pix_shift - center_peak_shift))
+    ### use highest peak instead of closest to zero
+    center_peak_idx = peaks[np.argmax(ccf[peaks])]
+    center_peak_shift = pix_shift[center_peak_idx]
+    # print(f"[Info] Closest peak to origin at {center_peak_shift} pixel shift (index {center_peak_idx}).")
     if ccf[center_peak_idx] != np.max(ccf):
         print(f"[Warning] Closest peak to origin (at {center_peak_shift}) is not the highest peak (at {pix_shift[np.argmax(ccf)]}).")
-    fitting_slice = slice(max(0, int(center_peak_idx-fitting_limit+0.5)), min(len(ccf), int(center_peak_idx+fitting_limit+1.5)))
+    # fitting_slice = slice(max(0, int(center_peak_idx-fitting_limit+0.5)), min(len(ccf)-1, int(center_peak_idx+fitting_limit+1.5)))
+    fitting_slice = slice(max(0, int(center_peak_idx-fitting_limit)), min(len(ccf)-1, int(center_peak_idx+fitting_limit+1)))
     _pix_shift = pix_shift[fitting_slice]
     # _pix_shift = pix_shift[abs(pix_shift) <= fitting_limit]
     _ccf = ccf[fitting_slice]
@@ -514,7 +517,7 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
     # Local percentile-based peak detection (catches weaker peaks)
     window_size = ylen // (nknots * 2)  # Adaptive window size
 
-    print(f"Using window size: {window_size}")
+    # print(f"Using window size: {window_size}")
 
     signal_peaks = []
     for i in range(ylen):
@@ -543,7 +546,7 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
     
     # all_detected_peaks = np.unique(np.concatenate((percentile_peaks, extended_peaks)))
     all_detected_peaks = np.unique(np.array(extended_peaks))
-    print(f"Detected {len(extended_peaks)} peaks using signal method with window size {window_size}")
+    # print(f"Detected {len(extended_peaks)} peaks using signal method with window size {window_size}")
     # print(f"Total detected peaks: {len(all_detected_peaks)}")
     
     # Create a mask for all detected peaks
@@ -586,7 +589,7 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
     # Optionally scale continuum_score to have a running window maximum of 1 before further processing
     if True:  # Set to True to enable normalization to 1 in running window
         window_norm = window_size // 2
-        running_max = np.array([np.max(continuum_score[max(0, i-window_norm):min(len(continuum_score), i+window_norm+1)]) for i in range(len(continuum_score))])
+        running_max = np.array([np.max(continuum_score[max(0, i-window_norm):min(len(continuum_score)-1, i+window_norm+1)]) for i in range(len(continuum_score))])
         running_max[running_max == 0] = 1  # Avoid division by zero
         continuum_score = continuum_score / running_max
         
@@ -620,7 +623,7 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
             #         local_peak_idx = p - search_range.start
             #         # Mask out around peaks
             #         # mask_start = max(0, local_peak_idx - 1)
-            #         # mask_end = min(len(mask), local_peak_idx + 2)
+            #         # mask_end = min(len(mask)-1, local_peak_idx + 2)
             #         # mask[mask_start:mask_end] = False
             #         mask[local_peak_idx] = False
             # if np.any(mask):
@@ -655,16 +658,16 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
 
     # Remove any knots marked as np.nan
     if np.any(np.isnan(x_fit)):
-        print("Removing knots that could not be placed in good continuum regions.")
+        # print("Removing knots that could not be placed in good continuum regions.")
         x_fit = x_fit[~np.isnan(x_fit)]
     # Remove duplicate knots
     if len(x_fit) != len(np.unique(x_fit)):
-        print("Removing duplicate knots after placement.")
+        # print("Removing duplicate knots after placement.")
         x_fit = np.unique(x_fit)
     
     # Ensure knots are still in order and within bounds
     if np.any(x_fit < x.min()) or np.any(x_fit > x.max()):
-        print("Clipping knots to valid range.")
+        # print("Clipping knots to valid range.")
         x_fit = np.clip(x_fit, x.min(), x.max())
     # x_fit = np.sort(x_fit)
 
@@ -677,7 +680,7 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
     i = 0
     while i < len(x_fit) - 1:
         if x_fit[i+1] - x_fit[i] < min_dist:
-            print(f"Dropping close knots at {x_fit[i]:.1f} and {x_fit[i+1]:.1f}, distance: {x_fit[i+1] - x_fit[i]:.1f}")
+            # print(f"Dropping close knots at {x_fit[i]:.1f} and {x_fit[i+1]:.1f}, distance: {x_fit[i+1] - x_fit[i]:.1f}")
             # Compare continuum_score at both knots
             score_i = continuum_score[int(x_fit[i])]
             score_ip1 = continuum_score[int(x_fit[i+1])]
@@ -693,16 +696,17 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
         else:
             i += 1
     x_fit = x_fit[keep]
-    print(f"Final nknot after moving knots and dropping close pairs: {np.sum(keep)} out of {nknots}")
+    # print(f"Final nknot after moving knots and dropping close pairs: {np.sum(keep)} out of {nknots}")
     # print(f"Final knot positions: {x_fit} based on {keep}.")
     
     if norm_type == 'minimum':
-        y_fit = [np.min(_y[int(max(0,_x-smooth)):int(min(len(x),_x+smooth+1))]) for _x in x_fit]  # Use local minima around knots
+        y_fit = [np.min(_y[int(max(0, int(_x - smooth))):int(min(len(x)-1, int(_x + smooth + 1)))+1]) for _x in x_fit]  # Use local minima around knots
     elif norm_type == 'continuum':
         y_fit = continuum_estimate[x_fit.astype(int)]  # Use local continuum estimate for knot
     else:
         raise ValueError("Invalid norm_type. Use 'minimum' or 'continuum'.")
     # Improved boundary conditions using continuum estimate
+    # No, index len(x) would be out of bounds for array x (valid indices are 0 to len(x)-1).
     boundary_width = window_size // 2
     y_fit[0] = np.median(continuum_estimate[:boundary_width])
     y_fit[-1] = np.median(continuum_estimate[-boundary_width:])
@@ -803,7 +807,7 @@ def get_lines_in_order(wave, linelist, elements=None, intensity_threshold=None, 
     # Optional: element condition
     if elements is not None:
         mask &= np.isin(linelist['element'], elements)
-    print(f"Found {np.sum(mask)} lines in the order.")
+    # print(f"Found {np.sum(mask)} lines in the order.")
     return linelist[mask]
 
 def plot_order_with_lines(wave, thxe_order, linelist, original_solution=None):
@@ -830,8 +834,6 @@ def plot_order_with_lines(wave, thxe_order, linelist, original_solution=None):
             unique[l] = h
     plt.legend(unique.values(), unique.keys())
     plt.show()
-
-
 
 def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, offset=0, plot=False):
     """
@@ -902,13 +904,24 @@ def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, offset=0, plot=
     lines_wave_positions = []
     for line in lines:
         line_wave = line['obs_wl_air(nm)']
-        idx = np.argmin(np.abs(wavelengths - line_wave)) + int(np.round(offset, 0))
-        line_pixel = min_pixel + idx + (line_wave - wavelengths[idx])/(wavelengths[idx+1] - wavelengths[idx]) \
+        idx = np.argmin(np.abs(wavelengths - line_wave))
+        pix_frac_in_wave = (line_wave - wavelengths[idx])
+        idx += int(offset) # apply offset to index (i.e. guess pixel position)
+        if idx <= 0 or idx >= len(pixels)-1:
+            # print(f"Line {line_wave:.3f} nm is out of pixel range after offset.")
+            passed_mask.append(False)
+            # lines_pixel_positions.append(np.nan)
+            # lines_wave_positions.append(np.nan)
+            continue
+        # line_pixel = min_pixel + idx + (line_wave - wavelengths[idx])/(wavelengths[idx+1] - wavelengths[idx]) \
+        #     if line_wave - wavelengths[idx] > 0 \
+        #     else min_pixel + idx + (line_wave - wavelengths[idx])/(wavelengths[idx] - wavelengths[idx-1])
+        line_pixel = min_pixel + idx + (pix_frac_in_wave)/(wavelengths[idx+1] - wavelengths[idx]) \
             if line_wave - wavelengths[idx] > 0 \
-            else min_pixel + idx + (line_wave - wavelengths[idx])/(wavelengths[idx] - wavelengths[idx-1])
+            else min_pixel + idx + (pix_frac_in_wave)/(wavelengths[idx] - wavelengths[idx-1])
         # line_pixel += offset
 
-        fit_range = slice(max(0, idx-10), min(len(pixels), idx+11))
+        fit_range = slice(max(0, idx-10), min(len(pixels)-1, idx+11))
         x_fit = pixels[fit_range]
         y_fit = flux[fit_range]
 
@@ -975,6 +988,7 @@ def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, offset=0, plot=
         try:
             popt, _ = curve_fit(general_gaussian, x_fit_masked, y_fit_masked, p0=p0, bounds=bounds)
             if plot:
+                plt.close('all')
                 plt.plot(x_fit, y_fit, 'b-', label='Data')
                 plt.scatter(x_fit_masked, y_fit_masked, c='k', s=5, label='Line points')
                 x_fine = np.arange(x_fit_masked.min(), x_fit_masked.max()+0.1, 0.1)
@@ -1013,7 +1027,7 @@ def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, offset=0, plot=
     # # Keep only unique pixel positions and corresponding wavelengths
     # lines_wave_positions = lines_wave_positions[passed_mask]
     # lines_pixel_positions = lines_pixel_positions[passed_mask]
-    print(f"Total lines fitted: {len(lines_pixel_positions)}")
+    # print(f"Total lines fitted: {len(lines_pixel_positions)}")
     
     return lines_pixel_positions, lines_wave_positions, lines
 
@@ -1055,9 +1069,8 @@ def fit_all_lines_per_order(wave, norm_extracted_Th, ORDER, traces, linelist, ar
     pixel_positions, wave_positions, order_positions = [], [], []
     # fitted_lines = []
     
-        
     for order, absolute_order in enumerate(ORDER):
-        print(f"Fitting lines in order {absolute_order} ({order+1}/{len(ORDER)})")
+        # print(f"Fitting lines in order {absolute_order} ({order+1}/{len(ORDER)})")
         lines_pixel_positions, lines_wave_positions, _fitted_lines = fit_lines_in_order(
             wave[order],
             norm_extracted_Th[order],
@@ -1072,6 +1085,7 @@ def fit_all_lines_per_order(wave, norm_extracted_Th, ORDER, traces, linelist, ar
     wave_positions = np.concatenate(wave_positions)
     order_positions = np.concatenate(order_positions)
     # fitted_lines = np.concatenate(fitted_lines)
+    # print(f"Total fitted lines: {len(np.unique(wave_positions))}")
 
     return pixel_positions, wave_positions, order_positions
 
@@ -1246,7 +1260,7 @@ def get_arcTh_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, fil
 
 # def calibrate_absolute_Th(extracted_science_orders, obs_list, veloce_paths, traces, thxe_image, hdr, arm, plot=False, filename=None):
 def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_mode, plot=False, plot_filename=None, th_linelist_filename='Default'):
-    ### TODOL add header info to wavelength solution file, including params used, save fitted lines to file
+    ### TODO: add header info to wavelength solution file, including params used, save fitted lines to file
     wave_solution_filename = f"arcTh_wave_{arm}_{date}.fits"
     if os.path.exists(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename)):
         print(f"Reading existing wavelength solution file {wave_solution_filename}")
@@ -1282,16 +1296,17 @@ def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_m
         ref_arcTh = [normalise_ArcTh_order_with_spline(ref_arcTh_order, nknots=nknots) for ref_arcTh_order in ref_arcTh]
 
         # TODO: add trace.y (pixels in dispersion) to saved fits to have an information on the extracted pixel positions???
-        _, _, offsets = calculate_offset_map(np.array(ORDER), ref_arcTh, traces.y, extracted_arcTh, traces.y, 8, mode='Th')
-        print(f"Median offset between reference and current arcTh: {np.nanmedian(offsets):.2f} [pixel].")
-        if np.nanstd(offsets) > 1.0:
-            print(f"[Warning]: Large scatter of offsets found between reference and current arcTh ({np.nanstd(offsets):.2f} [pixel]).")
+        _, _, offset_array = calculate_offset_map(np.array(ORDER), ref_arcTh, traces.y, extracted_arcTh, traces.y, 8, mode='Th')
+        offset = np.nanmedian(offset_array[abs(offset_array-np.nanmedian(offset_array))<=np.nanstd(offset_array)])
+        print(f"Median offset between reference and current arcTh: {offset:.2f} [pixel].")
+        if np.nanstd(offset_array) > 1.0:
+            print(f"[Warning]: Large scatter of offsets found between reference and current arcTh ({np.nanstd(offset_array):.2f} [pixel]).")
 
         pixel_positions, wave_positions, order_positions = fit_all_lines_per_order(
-            static_wave, extracted_arcTh, ORDER, traces, linelist, arm, offset=np.nanmedian(offsets), plot=False)
+            static_wave, extracted_arcTh, ORDER, traces, linelist, arm, offset=offset, plot=False)
         
         if len(np.unique(order_positions)) != len(ORDER):
-            print(f"[Warning]: {len(np.unique(order_positions)) - len(ORDER)} order(s) don't have fitted lines.")
+            print(f"[Warning]: {len(ORDER) - len(np.unique(order_positions))} order(s) don't have fitted lines.")
             missing_orders = [order for order in ORDER if order not in np.unique(order_positions)]
             print(f"Missing orders: {missing_orders}")
             

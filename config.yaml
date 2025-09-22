@@ -1,12 +1,14 @@
 # primary information for the reduction
-reduce: run # what to reduce options: 'run', 'night', or 'file'; run will reduce all dates in provided directories.
-date: 230826 # date of the observation (YYMMDD), if 'reduce' is 'night' or 'file'
+reduce: night # what to reduce options: 'run', 'night', or 'file'; run will reduce all dates in provided directories.
+date: '230826' # date of the observation (YYMMDD), if 'reduce' is 'night' or 'file'
 filename: 26aug20146.fits # name of the file to reduce, if 'reduce' is 'file'
-science_targets: targets.dat # file containing a list of science targets
+science_targets: 'Default' # file containing a list of science targets, 'Default' will use all science frames in the night/run
 calib_type: arcTh # Wavelength calibration to use SimLC, arcTh or Static (not recommended), other possibilieties are not implemented: SimThXe, Interpolate_LC, Interpolate_Th
 # secondary information for the reduction
-arm: 'red' # Which arm to reduce 'all', 'red', 'green' or 'blue'
+use_log: False # True or False, if True the code will use the log files to identify the files
+arm: red # Which arm to reduce 'all', 'red', 'green' or 'blue'
 amplifier_mode: 4 # 2 or 4
+validate_trace: True # True or False, if True the code will cross-correlate FibFlat with reference to determine offset of the trace(s)
 sim_calib: True # Flag indicating if the simultaneous calibration was used True or False
 plot_diagnostic: True # True or False
 scattered_light: False # try to remove scattered light (background) True or False

@@ -1,11 +1,20 @@
 import os
+# print(f"DEBUG: About to import matplotlib, QT_QPA_PLATFORM={os.environ.get('QT_QPA_PLATFORM', 'NOT_SET')}")
+
+# Force non-interactive backend before any other matplotlib imports
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+# print("DEBUG: Set matplotlib backend to Agg")
+
 import numpy as np
 import matplotlib.pyplot as plt
+# print("DEBUG: matplotlib.pyplot imported successfully")
 
 from astropy.io import fits
 from astropy.constants import c
 from scipy.signal import find_peaks
-from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d import Axes3D  # This might also trigger the warning
+# print("DEBUG: All imports completed")
 
 from . import veloce_reduction_tools
 
@@ -118,7 +127,7 @@ def plot_extracted_2D_order(extracted_order_imgs, order, traces, filename, veloc
     if flatfielded:
         _, extracted_orders_flat = veloce_reduction_tools.extract_orders_with_trace(flatfield, traces)
         fig, (ax1, ax2) = plt.subplots(1,2)
-        im1 = ax.imshow(extracted_order_imgs[order],
+        im1 = ax1.imshow(extracted_order_imgs[order],
                         extent=[0, lower_range + upper_range, 0, extracted_order_imgs[order].shape[0]],
                         aspect='auto', origin='lower', cmap='viridis', norm='log')
         ax1.set_xticks(xticks)
@@ -127,7 +136,7 @@ def plot_extracted_2D_order(extracted_order_imgs, order, traces, filename, veloc
         ax1.set_title(f"Extracted order {order}")
         ax1.set_xlabel("Pixel")
         ax1.set_ylabel("Row")
-        im2 = ax.imshow(extracted_orders_flat[order],
+        im2 = ax2.imshow(extracted_orders_flat[order],
                         extent=[0, lower_range + upper_range, 0, extracted_order_imgs[order].shape[0]],
                         aspect='auto', origin='lower', cmap='viridis', norm='log')
         ax2.set_xticks(xticks)

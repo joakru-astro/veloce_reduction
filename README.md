@@ -26,31 +26,50 @@ The reduction workflow consists of the following steps:
 
 ### Contents
 The repository consists of the following: 
+- config.yaml - configuration file for the reduction
 - veloce_reduction.py - script running reduction based on the configuration file
 - veloce_reduction.ipynb - notebook presenting minimal working example (steps 1-3 as of now)
 - step-by-step_extraction.ipynb - step by step 1d spectrum extraction example
 - simple_veloce_reduction - a python module handling the reduction including:
   - veloce_reduction_tools.py - low-level functions used in the reduction
-  - veloce_config.py - loads configuration file and implements class handling the paths
-  - veloce_logs.py - functions used to read standard veloce logs and to save targets list
+  - veloce_config.py - loads configuration file, reads night logs, creats list of observations, and implements class handling the paths
   - veloce_extraction.py - high-level functions for data extraction
   - veloce_wavecalib.py - functions for dynamic wave calibration
   - veloce_diagnostic.py - functions to make diagnostic plots from reductions
 - Trace/ - directory with traces for extraction
 - Wave/ - directory with files for wavelength calibration 
-- \[deprecated\] veloce_trace.ipynb - notebook containing extraction of trace based on flat field image
-- \[deprecated\] veloce_wave_calib.ipynb - notebook checking precomputed wave calibration
-- \[deprecated\] extract_one_night.ipynb - old notebook for extraction data from one night based on targets list
+- \[additional content\] veloce_trace.ipynb - notebook containing extraction of trace based on flat field image
+- \[additional content\] veloce_wave_calib.ipynb - notebook with step-by-step LC and arcTh wave calibration, check precomputed solutions, and some plots against each other
+- \[additional content\] veloce_gain_ratio.ipynb - examination of gain ratio (moving to values from Veloce Manual)
+
 
 ### Requirements
+
+Python distribution
+
+Install the following non-standard Python packages:
+
+```bash
+pip install astropy csaps matplotlib numpy scipy PyYAML scikit-learn
 ```
-- astropy
-- csaps
-- matplotlib
-- numpy
-- scipy
-- yaml
+
+Or using conda:
+```bash
+conda install astropy matplotlib numpy scipy PyYAML scikit-learn
+conda install -c conda-forge csaps
 ```
+
+**Tested with:**
+Python version: 3.12.1 
+
+Package versions:
+astropy: 5.3.4
+numpy: 1.26.3
+scipy: 1.11.4
+matplotlib: 3.8.0
+scikit-learn: 1.7.1
+PyYAML: 6.0.1
+csaps: 1.1.0
 
 ### Limitations
 In its current form, my pipeline doesn't use optimal extraction and just co-adds the flux from all the fibres; thus, it is probably not suited for precise RV science.

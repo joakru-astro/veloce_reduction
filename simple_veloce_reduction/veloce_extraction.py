@@ -35,6 +35,40 @@ def load_trace_data(arm, trace_path, sim_calib=False, filename=None):
     traces = veloce_reduction_tools.Traces.load_traces(filename)
     return traces
 
+def get_trace_shift(traces, veloce_paths, arm, amplifier_mode, sim_calib, obs_list):
+    date = list(obs_list['science'].keys())[0] # date of first science observation
+    trace_shift_filename =  os.path.join(veloce_paths.trace_shift_dir, f'trace_{arm}_{date}.pkl')
+    if os.path.exists(trace_shift_filename):
+        print(f'[Info]: Loading existing traces with determined shift {trace_shift_filename}')
+        traces = veloce_reduction_tools.Traces.load_traces(trace_shift_filename)
+    else:
+        master_flat_filename = os.path.join(veloce_paths.master_dir, f'master_flat_{arm}_{date}.fits')
+        if os.path.exists(master_flat_filename):
+            with fits.open(master_flat_filename) as hdul:
+                master_flat = hdul[0].data
+                hdr = hdul[0].header
+        else:
+            file_list = obs_list[f'flat_{arm}'][date]
+            file_list = veloce_reduction_tools.get_longest_consecutive_files(file_list)
+            master_flat, hdr = veloce_reduction_tools.get_master_mmap(
+                file_list, f"flat_{arm}", veloce_paths.input_dir,
+                date, arm, amplifier_mode)
+            veloce_reduction_tools.save_image_fits(master_flat_filename, master_flat, hdr)
+    
+        shift, pix_shift, ccf = traces.determine_trace_shift(master_flat, arm=arm)
+        if np.isnan(shift):
+            print('[Warning]: Could not determine trace shift, not adjusting traces.')
+        elif shift == 0:
+            print('[Info]: No trace shift detected, not adjusting traces.')
+            traces.save_traces(filename=f'trace_{arm}_{date}.pkl', trace_dir=veloce_paths.trace_shift_dir, arm=arm, amp_mode=amplifier_mode, sim_calib=sim_calib)
+        else:
+            print(f'[Info]: Adjusting traces by {shift} pixels.')
+            traces.x = [np.array(x) + shift for x in traces.x]
+            traces.traces = [np.array([y, x]) for y, x in zip(traces.y, traces.x)]
+            traces.save_traces(filename=f'trace_{arm}_{date}.pkl', trace_dir=veloce_paths.trace_shift_dir, arm=arm, amp_mode=amplifier_mode, sim_calib=sim_calib)
+        
+    return traces
+
 def remove_scattered_light(frame, hdr, traces, diagnostic=False):
     """
     Remove scattered light from the image.
@@ -67,7 +101,7 @@ def get_flat(veloce_paths, arm, amplifier_mode, date, obs_list):
         with fits.open(master_flat_filename) as hdul:
             master_flat = hdul[0].data
             hdr = hdul[0].header
-        norm_flat = veloce_reduction_tools.normalise_flat(master_flat, hdr)
+        norm_flat, hdr = veloce_reduction_tools.normalise_flat(master_flat, hdr)
     else:
         file_list = obs_list[f'flat_{arm}'][date]
         file_list = veloce_reduction_tools.get_longest_consecutive_files(file_list)
@@ -119,7 +153,10 @@ def extract_run(target_list, config, veloce_paths, obs_list):
         ccd = data_dirs[arm]
         ### load traces
         traces = load_trace_data(arm, veloce_paths.trace_dir, sim_calib=config['sim_calib'], filename=config['trace_file'])
-        
+        if config['validate_trace']:
+            traces = get_trace_shift(traces, veloce_paths,
+                                 arm, config['amplifier_mode'], config['sim_calib'],
+                                 obs_list)
         
         if config['calib_type'] == 'Static':
             ### load static wave calibration based on ThAr
@@ -133,9 +170,9 @@ def extract_run(target_list, config, veloce_paths, obs_list):
             pass # load LC?
 
         for date in target_list.keys(): 
-            # if config['flat_field']:
-            flat, norm_flat = get_flat(config, veloce_paths, arm, config['amplifier_mode'], date, obs_list)
-            traces.adjust_traces_with_ccf(flat, arm)
+            if config['flat_field']:
+                flat, norm_flat = get_flat(veloce_paths, arm, config['amplifier_mode'], date, obs_list)
+            # traces.adjust_traces_with_ccf(flat, arm)
 
             if config['calib_type'] == 'arcTh':
                 arcTh_wave = veloce_wavecalib.calibrate_absolute_Th(traces, veloce_paths, obs_list,
@@ -152,7 +189,7 @@ def extract_run(target_list, config, veloce_paths, obs_list):
                         image_data = hdul[0].data
                         hdr = hdul[0].header
 
-                        image_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(
+                        image_subtracted_bias  = veloce_reduction_tools.remove_overscan_bias(
                             image_data, hdr, arm, config['amplifier_mode'], overscan_range=32)
                         
                         if config['flat_field']:
@@ -246,10 +283,14 @@ def extract_night(target_list, config, veloce_paths, obs_list):
         ccd = data_dirs[arm]
         ### load traces
         traces = load_trace_data(arm, veloce_paths.trace_dir, sim_calib=config['sim_calib'], filename=config['trace_file'])
+        if config['validate_trace']:
+            traces = get_trace_shift(traces, veloce_paths,
+                                 arm, config['amplifier_mode'], config['sim_calib'],
+                                 obs_list)
         
-        # if config['flat_field']:
-        flat, norm_flat = get_flat(config, veloce_paths, arm, config['amplifier_mode'], date, obs_list)
-        traces.adjust_traces_with_ccf(flat, arm)
+        if config['flat_field']:
+            flat, norm_flat = get_flat(veloce_paths, arm, config['amplifier_mode'], date, obs_list)
+        # traces.adjust_traces_with_ccf(flat, arm)
 
         if config['calib_type'] == 'Static':
             # load wave calibration based on ThAr
@@ -362,8 +403,12 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
         ccd = data_dirs[arm]
         ### load traces
         traces = load_trace_data(arm, veloce_paths.trace_dir, sim_calib=config['sim_calib'], filename=config['trace_file'])
-        flat, norm_flat = get_flat(config, veloce_paths, arm, config['amplifier_mode'], config['date'], obs_list)
-        traces.adjust_traces_with_ccf(flat, arm)
+        # flat, norm_flat = get_flat(veloce_paths, arm, config['amplifier_mode'], config['date'], obs_list)
+        if config['validate_trace']:
+            traces = get_trace_shift(traces, veloce_paths,
+                                 arm, config['amplifier_mode'], config['sim_calib'],
+                                 obs_list)
+        # traces.adjust_traces_with_ccf(flat, arm)
 
         # if sim_calib:
         #     # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
@@ -402,6 +447,7 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
                             image_data, hdr, arm, config['amplifier_mode'], overscan_range=32)
                 
                 if config['flat_field']:
+                    flat, norm_flat = get_flat(veloce_paths, arm, config['amplifier_mode'], config['date'], obs_list)
                     image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, norm_flat, hdr)
                 
                 if config['scattered_light']:

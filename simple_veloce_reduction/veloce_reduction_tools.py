@@ -305,34 +305,39 @@ class Traces:
     
     @staticmethod
     def determine_trace_shift(frame, reference_frame=None, arm=None, row=None):
+        signal_threshold = {'red': 500, 'green': 300, 'blue': 100}[arm] if arm in ['red', 'green', 'blue'] else 500
         if reference_frame is None and arm is not None:
             # TODO: use master flat from CSV
-            veloce_paths = veloce_config.VelocePaths()
-            reference_filename = os.path.join(veloce_paths.reduction_parent_dir,
+            _veloce_paths = veloce_config.VelocePaths()
+            reference_filename = os.path.join(_veloce_paths.reduction_parent_dir,
                                               'Master', f'master_flat_{arm}_230828.fits')
             with fits.open(reference_filename) as hdul:
                 reference_frame = hdul[0].data
                 # header = hdul[0].header
-        elif reference_frame is None and arm is None:
+        elif arm is None:
             raise ValueError('Please provide either a reference frame or arm name to load the master flat.')
         pix_shift = np.arange(-1*frame.shape[1]+1, frame.shape[1], 1)
         _shifts = []
         if row is None:
             ccf = np.zeros((frame.shape[0], frame.shape[1]*2-1))
             for row in range(300, frame.shape[0]-300, 50):  # avoid edges
-                if np.std(frame[row,:]) > 500:  # only do cross-correlation for rows with signal
+                if np.std(frame[row,:]) > signal_threshold:  # only do cross-correlation for rows with signal
                     ccf[row] = np.correlate(frame[row,:], reference_frame[row,:], mode='full')
                     _shifts.append(pix_shift[np.argmax(ccf[row])])
                     # _shifts.append(fit_ccf_peak(pix_shift, ccf[row], fitting_limit=7)[0])
+                else: 
+                    pass
+                    # print(f'Row {row} has no signal {np.std(frame[row,:])}')
             # shift = mode(_shifts)[0]
             shift = np.nanmedian(_shifts)
+            # print(f'Determined shift of {shift} pixels from {len(_shifts)} rows.')
         else:
             if np.std(frame[row,:]) > 500:
                 ccf = np.correlate(frame[row,:], reference_frame[row,:], mode='full')
                 # shift = fit_ccf_peak(pix_shift, ccf, fitting_limit=7)[0]
                 shift = pix_shift[np.argmax(ccf)]
             else:
-                print(f'Row {row} has no signal')
+                print(f'[Warrning]: Row {row} has no signal')
                 return np.nan, [np.nan], [np.nan]
         
         return shift, pix_shift, ccf
@@ -411,9 +416,17 @@ class Traces:
         return np.array(lower), np.array(upper)
     
     def adjust_traces_with_ccf(self, frame, arm):
-        shift, pix_shift, ccf = self.determine_trace_shift(frame, arm=arm, row=None)
-        self.x = [np.array(x) + shift for x in self.x]
-        self.traces = [np.array([y, x]) for y, x in zip(self.y, self.x)]
+        shift, pix_shift, ccf = self.determine_trace_shift(frame, arm=arm)
+        if np.isnan(shift):
+            print('Could not determine trace shift, not adjusting traces.')
+        elif shift == 0:
+            print('No trace shift detected, not adjusting traces.')
+        else:
+            print(f'Adjusting traces by {shift} pixels.')
+            self.x = [np.array(x) + shift for x in self.x]
+            self.traces = [np.array([y, x]) for y, x in zip(self.y, self.x)]
+        
+        return shift, pix_shift, ccf
 
     def find_summing_ranges(self, image, search_box=50, plot=False, peak_mode='closest'):
         lower, upper = self.determine_summing_range(image, self, search_box=search_box, plot=plot, peak_mode=peak_mode)
@@ -482,7 +495,8 @@ def determine_amplifier_mode(hdr):
         try:
             gains.append(float(hdr[f'DETA{n}GN']))
         except KeyError:
-            print(f'Gain for amplifier {n} not found in header.')            
+            pass
+            # print(f'Gain for amplifier {n} not found in header.')            
     amplifier_mode = len(gains)
     if amplifier_mode not in [2, 4]:
         raise ValueError("Invalid amplifier mode. Amplifier mode must be 2 or 4.")
@@ -546,7 +560,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         q1 -= np.median(frame[q1_overscan_mask == 1])
         q1[q1 < 0] = 0
         q1_gain = gain
-        print(f'Gain for quadrant 1: {q1_gain}')
+        # print(f'Gain for quadrant 1: {q1_gain}')
         q1 /= q1_gain
 
         # bottom left - Q2
@@ -562,7 +576,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         q2[q2 < 0] = 0
         # q2_gain = float(hdr['DETA1GN'])
         q2_gain = q1_gain * gain_ratio_q2_q1
-        print(f'Gain for quadrant 2: {q2_gain}')
+        # print(f'Gain for quadrant 2: {q2_gain}')
         q2 /= q2_gain
 
         # bottom right - Q3
@@ -578,7 +592,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         q3[q3 < 0] = 0
         # q3_gain = float(hdr['DETA3GN'])
         q3_gain = q1_gain * gain_ratio_q4_q1 * gain_ratio_q3_q4
-        print(f'Gain for quadrant 3: {q3_gain}')
+        # print(f'Gain for quadrant 3: {q3_gain}')
         q3 /= q3_gain
 
         # top right - Q4
@@ -594,7 +608,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         q4[q4 < 0] = 0
         # q4_gain = float(hdr['DETA4GN'])
         q4_gain = q1_gain * gain_ratio_q4_q1
-        print(f'Gain for quadrant 4: {q4_gain}')
+        # print(f'Gain for quadrant 4: {q4_gain}')
         q4 /= q4_gain
 
         image_substracted_bias = np.concatenate(
@@ -623,7 +637,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         h1 -= np.median(frame[h1_overscan_mask == 1])
         h1[h1 < 0] = 0
         h1_gain = float(hdr['DETA1GN'])
-        print(f'Gain for half 1: {h1_gain}')
+        # print(f'Gain for half 1: {h1_gain}')
         h1 /= h1_gain
 
         ### right - H2
@@ -639,7 +653,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         h2[h2 < 0] = 0
         # h2_gain = float(hdr['DETA2GN'])
         h2_gain = h1_gain * gain_ratio
-        print(f'Gain for half 2: {h2_gain}')
+        # print(f'Gain for half 2: {h2_gain}')
         h2 /= h2_gain
 
         image_substracted_bias = np.concatenate((h1, h2), axis=1)
@@ -1604,7 +1618,7 @@ def normalise_flat(flat, hdr):
         
     normalised_flat = flat / (smoothed_flat)
     if np.any(normalised_flat <= 0):
-        print(np.min(normalised_flat), np.sum(normalised_flat <= 0))
+        # print(np.min(normalised_flat), np.sum(normalised_flat <= 0))
         normalised_flat[normalised_flat <= 0] = 1
 
     # normalised_flat_name = master_filename.split('.')[0]+'_norm.fits'
@@ -1687,7 +1701,7 @@ def save_extracted_spectrum_fits(filename, wave, flux, hdr):
     - The function assumes that the Astropy package is installed and that the FITS file will be saved in the
       specified output directory.
     """
-    if all(len(order) == len(wave[0]) for order in wave):
+    if all(len(order) == len(flux[0]) for order in flux):
         hdu_wave = fits.ImageHDU(wave, name='WAVE')
         hdu_flux = fits.ImageHDU(flux, name='FLUX')
     else:
