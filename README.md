@@ -26,7 +26,7 @@ The reduction workflow consists of the following steps:
 
 ### Contents
 The repository consists of the following: 
-
+```
 veloce_reduction/
 ├── README.md                           # This file
 ├── LICENSE                             # License file ###TODO
@@ -46,8 +46,8 @@ veloce_reduction/
 │   │   └── ...
 │   └── Wave/                           # Wavelength calibration data (custom and ones from Veloce Manual)
 │       └── ...
-└── \[additional content\]              # Notebooks with in detail investigations some wip
-
+└── [additional content]                # Notebooks with in detail investigations some wip
+```
 ### Requirements
 
 Python distribution
