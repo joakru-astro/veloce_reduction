@@ -10,7 +10,8 @@ data_dirs = {'red': 'ccd_3', 'green': 'ccd_2', 'blue': 'ccd_1'}
 
 class VelocePaths:
     def __init__(self, input_dir=None, output_dir=None):
-        self.reduction_parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # self.reduction_parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.reduction_parent_dir = os.path.dirname(os.path.abspath(__file__))
         
         if input_dir is not None:
             input_dir = os.path.abspath(input_dir)
@@ -88,7 +89,7 @@ class VelocePaths:
         else:
             nondefault_dirs = False
         if nondefault_dirs:
-            os.rmdir(paths.intermediate_dir)
+            # os.rmdir(paths.intermediate_dir)
             paths.intermediate_dir = None
 
         return paths
@@ -180,6 +181,57 @@ def load_target_list(target_file):
     with open(target_file, 'r') as f:
         targets = f.read().splitlines()
     return targets
+
+def make_config(input_dir, output_dir,
+                wave_dir='Default', trace_dir='Default',
+                master_dir='Default', wavelength_calibration_dir='Default',
+                trace_shift_dir='Default', plot_dir='Default',
+                trace_file='Default',
+                reduce='run', date=None, filename=None,
+                calib_type='arcTh', science_targets='Default',
+                arm='all', amplifier_mode=4,
+                use_log=False, plot_diagnostic=False,
+                validate_trace=True, sim_calib=True,
+                scattered_light=False, flat_field=False):
+
+    config = {
+        'input_dir': input_dir,
+        'output_dir': output_dir,
+        'reduce': reduce,
+        'date': date,
+        'filename': filename,
+        'calib_type': calib_type,
+        'science_targets': science_targets,
+        'arm': arm,
+        'amplifier_mode': amplifier_mode,
+        'use_log': use_log,
+        'plot_diagnostic': plot_diagnostic,
+        'validate_trace': validate_trace,
+        'sim_calib': sim_calib,
+        'scattered_light': scattered_light,
+        'flat_field': flat_field,
+        'wave_dir': wave_dir,
+        'trace_dir': trace_dir,
+        'master_dir': master_dir,
+        'wavelength_calibration_dir': wavelength_calibration_dir,
+        'trace_shift_dir': trace_shift_dir,
+        'plot_dir': plot_dir,
+        'trace_file': trace_file
+    }
+    if validate_config(config):
+        return config
+    else:
+        raise ValueError('Invalid configuration')
+
+def save_config(config, veloce_paths, config_filename='config.yaml'):
+    if not os.path.exists(veloce_paths.output_dir):
+        os.makedirs(veloce_paths.output_dir)
+    config_file = os.path.join(veloce_paths.output_dir, config_filename)
+    with open(config_file, 'w') as f:
+        yaml.dump(config, f)
+    print(f'Configuration saved to {config_file}')
+
+    return config_file
 
 def format_date(date_str):
     # Parse the date string using datetime.strptime

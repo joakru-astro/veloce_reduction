@@ -55,7 +55,7 @@ def get_trace_shift(traces, veloce_paths, arm, amplifier_mode, sim_calib, obs_li
                 date, arm, amplifier_mode)
             veloce_reduction_tools.save_image_fits(master_flat_filename, master_flat, hdr)
     
-        shift, pix_shift, ccf = traces.determine_trace_shift(master_flat, arm=arm)
+        shift, pix_shift, ccf = traces.determine_trace_shift_template(master_flat, arm=arm)
         if np.isnan(shift):
             print('[Warning]: Could not determine trace shift, not adjusting traces.')
         elif shift == 0:

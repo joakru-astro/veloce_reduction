@@ -309,15 +309,16 @@ class Traces:
     def determine_trace_shift(frame, reference_frame=None, arm=None, row=None):
         signal_threshold = {'red': 500, 'green': 300, 'blue': 100}[arm] if arm in ['red', 'green', 'blue'] else 500
         if reference_frame is None and arm is not None:
-            # TODO: use master flat from CSV
             _veloce_paths = veloce_config.VelocePaths()
             reference_filename = os.path.join(_veloce_paths.reduction_parent_dir,
                                               'Master', f'master_flat_{arm}_230828.fits')
             with fits.open(reference_filename) as hdul:
                 reference_frame = hdul[0].data
                 # header = hdul[0].header
-        elif arm is None:
+        elif reference_frame is None and arm is None:
             raise ValueError('Please provide either a reference frame or arm name to load the master flat.')
+        else:
+            pass
         pix_shift = np.arange(-1*frame.shape[1]+1, frame.shape[1], 1)
         _shifts = []
         if row is None:
@@ -341,6 +342,33 @@ class Traces:
             else:
                 print(f'[Warrning]: Row {row} has no signal')
                 return np.nan, [np.nan], [np.nan]
+        
+        return shift, pix_shift, ccf
+    
+    @staticmethod
+    def determine_trace_shift_template(frame, arm):
+        signal_threshold = {'red': 500, 'green': 300, 'blue': 100}[arm] if arm in ['red', 'green', 'blue'] else 500
+        # load template
+        _veloce_paths = veloce_config.VelocePaths()
+        template_filename = os.path.join(_veloce_paths.trace_dir, f'trace_{arm}_shift_template.pkl')
+        if os.path.exists(template_filename):
+            with open(template_filename, 'rb') as f:
+                shift_template = pickle.load(f)
+        
+        pix_shift = np.arange(-1*frame.shape[1]+1, frame.shape[1], 1)
+        _shifts = []
+        ccf = np.zeros((frame.shape[0], frame.shape[1]*2-1))
+        for row in shift_template.keys():  # avoid edges
+            if np.std(frame[row,:]) > signal_threshold:  # only do cross-correlation for rows with signal
+                ccf[row] = np.correlate(frame[row,:], shift_template[row], mode='full')
+                _shifts.append(pix_shift[np.argmax(ccf[row])])
+                # _shifts.append(fit_ccf_peak(pix_shift, ccf[row], fitting_limit=7)[0])
+            else: 
+                pass
+                # print(f'Row {row} has no signal {np.std(frame[row,:])}')
+        # shift = mode(_shifts)[0]
+        shift = np.nanmedian(_shifts)
+        # print(f'Determined shift of {shift} pixels from {len(_shifts)} rows.')
         
         return shift, pix_shift, ccf
     
@@ -418,7 +446,7 @@ class Traces:
         return np.array(lower), np.array(upper)
     
     def adjust_traces_with_ccf(self, frame, arm):
-        shift, pix_shift, ccf = self.determine_trace_shift(frame, arm=arm)
+        shift, pix_shift, ccf = self.determine_trace_shift_template(frame, arm=arm)
         if np.isnan(shift):
             print('Could not determine trace shift, not adjusting traces.')
         elif shift == 0:
