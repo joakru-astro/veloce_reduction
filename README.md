@@ -26,22 +26,27 @@ The reduction workflow consists of the following steps:
 
 ### Contents
 The repository consists of the following: 
-- config.yaml - configuration file for the reduction
-- veloce_reduction.py - script running reduction based on the configuration file
-- veloce_reduction.ipynb - notebook presenting minimal working example (steps 1-3 as of now)
-- step-by-step_extraction.ipynb - step by step 1d spectrum extraction example
-- simple_veloce_reduction - a python module handling the reduction including:
-  - veloce_reduction_tools.py - low-level functions used in the reduction
-  - veloce_config.py - loads configuration file, reads night logs, creats list of observations, and implements class handling the paths
-  - veloce_extraction.py - high-level functions for data extraction
-  - veloce_wavecalib.py - functions for dynamic wave calibration
-  - veloce_diagnostic.py - functions to make diagnostic plots from reductions
-- Trace/ - directory with traces for extraction
-- Wave/ - directory with files for wavelength calibration 
-- \[additional content\] veloce_trace.ipynb - notebook containing extraction of trace based on flat field image
-- \[additional content\] veloce_wave_calib.ipynb - notebook with step-by-step LC and arcTh wave calibration, check precomputed solutions, and some plots against each other
-- \[additional content\] veloce_gain_ratio.ipynb - examination of gain ratio (moving to values from Veloce Manual)
 
+veloce_reduction/
+├── README.md                           # This file
+├── LICENSE                             # License file ###TODO
+├── config.yaml                         # Example configuration file for the reduction
+├── veloce_reduction.py                 # The script running reduction based on the configuration file
+├── veloce_reduction.ipynb              # As above but notebook
+├── step-by-step_extraction.ipynb       # Example step by step 1d spectrum extraction
+│
+├── simple_veloce_reduction/            # A python module handling the reduction
+│   ├── __init__.py                     # 
+│   ├── veloce_config.py                # Configuration handling and path management
+│   ├── veloce_extraction.py            # High-level functions for data extraction
+│   ├── veloce_reduction_tools.py       # Low-level reduction utilities
+│   ├── veloce_wavecalib.py             # Wavelength calibration functions
+│   ├── veloce_diagnostic.py            # Diagnostic plotting functions
+│   ├── Trace/                          # Trace templates (custom and ones from Veloce Manual)
+│   │   └── ...
+│   └── Wave/                           # Wavelength calibration data (custom and ones from Veloce Manual)
+│       └── ...
+└── \[additional content\]              # Notebooks with in detail investigations some wip
 
 ### Requirements
 

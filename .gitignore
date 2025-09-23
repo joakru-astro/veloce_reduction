@@ -10,4 +10,5 @@ lc_ccf.ipynb
 veloce_trace.ipynb
 veloce_wave_calib.ipynb
 check_versions.py
-__pycache__//Master/
+__pycache__/
+/Master/
