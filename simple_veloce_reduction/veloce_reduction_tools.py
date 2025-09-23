@@ -168,7 +168,9 @@ class Traces:
             veloce_paths = veloce_config.VelocePaths()
             trace_dir = veloce_paths.trace_dir
         if filename:
-            filename = f'{trace_dir}/{filename}.pkl'
+            if not filename.endswith('.pkl'):
+                filename = f'{filename}.pkl'
+            filename = f'{trace_dir}/{filename}'
         elif filename is None and arm is not None and amp_mode is not None:
             if sim_calib:
                 filename = f'{trace_dir}/veloce_{arm}_{amp_mode}amp_sim_calib_trace.pkl'
