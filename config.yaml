@@ -18,12 +18,12 @@ flat_field: False # these are fiber flats (white light fiber spectrum) used for 
 input_dir: Data/Raw/CSV_Run # path to the directory with raw data (one in which the run directory is, i.e. input directory)
 output_dir: Data/Extracted/CSV_Run # path to the directory where extracted data will be stored (i.e. output directory)
 
-# below are paths where code will stor intermediet files and diagnostics
+# below are paths where code will store intermediet files and diagnostics
 # by default they are set as subdirectories of output directory with extracted data
 # blaze_dir: Default
 master_dir: Default # directory for master images for night/run
 wavelength_calibration_dir: Default # directory for wavelength calibration related files for the night/run
-trace_shift_dir: Default # TODO: add to the code
+trace_shift_dir: Default # directory for results of traces shifted to new position
 plot_dir: Default # directory for diagnostic plots
 
 # below are paths where the code will look for internal files

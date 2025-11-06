@@ -60,12 +60,12 @@ def get_trace_shift(traces, veloce_paths, arm, amplifier_mode, sim_calib, obs_li
             print('[Warning]: Could not determine trace shift, not adjusting traces.')
         elif shift == 0:
             print('[Info]: No trace shift detected, not adjusting traces.')
-            traces.save_traces(filename=f'trace_{arm}_{date}.pkl', trace_dir=veloce_paths.trace_shift_dir, arm=arm, amp_mode=amplifier_mode, sim_calib=sim_calib)
+            traces.save_traces(filename=f'trace_{arm}_{date}.pkl', trace_dir=veloce_paths.trace_shift_dir, arm=arm, sim_calib=sim_calib)
         else:
             print(f'[Info]: Adjusting traces by {shift} pixels.')
             traces.x = [np.array(x) + shift for x in traces.x]
             traces.traces = [np.array([y, x]) for y, x in zip(traces.y, traces.x)]
-            traces.save_traces(filename=f'trace_{arm}_{date}.pkl', trace_dir=veloce_paths.trace_shift_dir, arm=arm, amp_mode=amplifier_mode, sim_calib=sim_calib)
+            traces.save_traces(filename=f'trace_{arm}_{date}.pkl', trace_dir=veloce_paths.trace_shift_dir, arm=arm, sim_calib=sim_calib)
         
     return traces
 

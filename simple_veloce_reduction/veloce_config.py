@@ -124,7 +124,16 @@ class VelocePaths:
     
     # def __setitem__(self, key, value):
     #     self.__dict__[key] = value
-
+def load_target_list(target_file):
+    if target_file == 'Default':
+        return [None]
+    elif isinstance(target_file, list):
+        return target_file
+    elif not os.path.isabs(target_file):
+        target_file = os.path.join(os.getcwd(), target_file)
+    with open(target_file, 'r') as f:
+        targets = f.read().splitlines()
+    return targets
     
 def load_config(config_file):
     if not os.path.isabs(config_file):
@@ -136,7 +145,7 @@ def load_config(config_file):
         veloce_paths = VelocePaths.from_config(config)
         science_targets = load_target_list(config['science_targets'])
         config['science_targets'] = science_targets
-        config = {key: value for key, value in config.items() if 'dir' not in key}
+        # config = {key: value for key, value in config.items() if 'dir' not in key}
         return config, veloce_paths
     else:
         raise ValueError('Invalid configuration file')
@@ -154,10 +163,19 @@ def validate_config(config):
     if not isinstance(config['plot_diagnostic'], bool):
         raise ValueError(f'plot_diagnostic must be True or False, not {config["plot_diagnostic"]}')
     # validate targets list
-    if config['science_targets'] != 'Default' and not (os.path.exists(os.path.join(os.getcwd(), config['science_targets'])) or os.path.exists(config['science_targets'])):
+    if config['science_targets'] == 'Default':
+        pass
+    elif isinstance(config['science_targets'], list):
+        print(config['science_targets']) # maybe verify if targets are present for the run/night/file
+        pass
+    elif os.path.isabs(config['science_targets']):
+        if not os.path.exists(config['science_targets']):
+            raise FileNotFoundError(f'{config["science_targets"]} does not exist.')
+    elif not os.path.exists(os.path.join(os.getcwd(), config['science_targets'])):
         raise FileNotFoundError(f'{config["science_targets"]} does not exist.')
     else:
-        pass # maybe verify if targets are present for the run/night/file
+        pass
+        # raise ValueError('science_targets must be "Default", a list of target names, or a valid path to a target list file.')
     # validate input paths
     if not os.path.exists(os.path.abspath(config['input_dir'])):
         raise FileNotFoundError(f'{os.path.abspath(config["input_dir"])} does not exist.')
@@ -172,15 +190,6 @@ def validate_config(config):
         raise FileNotFoundError(f'{os.path.abspath(config["trace_dir"])} does not exist.')
     
     return True
-
-def load_target_list(target_file):
-    if target_file == 'Default':
-        return [None]
-    elif not os.path.isabs(target_file):
-        target_file = os.path.join(os.getcwd(), target_file)
-    with open(target_file, 'r') as f:
-        targets = f.read().splitlines()
-    return targets
 
 def make_config(input_dir, output_dir,
                 wave_dir='Default', trace_dir='Default',
@@ -359,7 +368,7 @@ def load_log_info(log_path, science_targets, selected_arm, day):
                         obs_list['SimLC'].append(file_name)
                     elif target.strip() == 'DarkFrame':
                         obs_list['dark'].append(file_name)
-                    elif target.strip() in science_targets or science_targets is None:
+                    elif target.strip() in science_targets or science_targets[0] is None:
                         obs_list['science'].append([target.strip(), file_name])
                     else:
                         pass
@@ -458,8 +467,14 @@ def get_obs_list(summary, target=None):
     Returns:
     - dict: A dictionary with non-empty lists of observations.
     """
+    print(summary)
     if target is not None:
-        summary_final = {k:[obs for obs in v if obs[0]==target] for k,v in summary.items() if v}
+        if isinstance(target, str):
+            summary_final = {k:[obs for obs in v if obs[0]==target] for k,v in summary.items() if v}
+        elif isinstance(target, list):
+            summary_final = {k:[obs for obs in v if obs[0] in target] for k,v in summary.items() if v}
+        else:
+            raise ValueError("target must be a string or a list of strings.")
     else:
         summary_final = {k:v for k,v in summary.items() if v}
 

@@ -31,7 +31,7 @@ class Traces:
       set_summing_range(summing_ranges):
         Adds new summing ranges to the summing_ranges list.
       set_wavelength_slice(start, stop):
-      save_traces(arm=None, amp_mode=None, trace_dir=None, filename=None):
+      save_traces(arm=None, trace_dir=None, filename=None):
         Saves the traces to a file.
       refit_traces(frame, fit_width=35, maxfrom scipy.signal import find_peaks_iterations=100, tolerance=1e-3, poly_order=5):
       adjust_traces(frame, fit_width=35, max_iterations=100, tolerance=1e-3):
@@ -139,7 +139,7 @@ class Traces:
         """
         self.wave_calib_slice = slice(start, stop)
     
-    def save_traces(self, filename=None, trace_dir=None, arm=None, amp_mode=None, sim_calib=False):
+    def save_traces(self, filename=None, trace_dir=None, arm=None, sim_calib=False):
         """
         Save the trace data to a specified file.
         
@@ -149,8 +149,6 @@ class Traces:
         - trace_dir (str, optional): The directory where the trace file will be saved.
         If not provided, a default directory is used.
         - arm (str, optional): The arm of the instrument (e.g., 'blue', 'red').
-        Used to generate the filename if not provided.
-        - amp_mode (int, optional): The amplifier mode (e.g., 2, 4).
         Used to generate the filename if not provided.
         - sim_calib (bool, optional): Whether the traces are for simultaneous calibration or not.
         Default is False. Used to generate the filename if not provided.
@@ -171,11 +169,11 @@ class Traces:
             if not filename.endswith('.pkl'):
                 filename = f'{filename}.pkl'
             filename = f'{trace_dir}/{filename}'
-        elif filename is None and arm is not None and amp_mode is not None:
+        elif filename is None and arm is not None:
             if sim_calib:
-                filename = f'{trace_dir}/veloce_{arm}_{amp_mode}amp_sim_calib_trace.pkl'
+                filename = f'{trace_dir}/veloce_{arm}_sim_calib_trace.pkl'
             else: 
-                filename = f'{trace_dir}/veloce_{arm}_{amp_mode}amp_no_sim_calib_trace.pkl'
+                filename = f'{trace_dir}/veloce_{arm}_no_sim_calib_trace.pkl'
         else:
             raise ValueError('Please provide a filename or arm and amp_mode.')
         
@@ -241,18 +239,25 @@ class Traces:
                         weighted_average = np.average(np.arange(len(row)),weights=row)
                         fit_x.append(weighted_average)
                         fit_y.append(y)
-                f = np.polyfit(fit_y,fit_x,poly_order)
+                    else:
+                        fit_x.append(np.nan)
+                        fit_y.append(y)
+                fit_x, fit_y = np.array(fit_x), np.array(fit_y)
+                mask = ~np.isnan(fit_x)
+                f = np.polyfit(fit_y[mask],fit_x[mask],poly_order)
                 f_current = np.polyval(f,fit_y)
 
                 # Check for convergence
-                if np.max(np.abs(f_current - f_prev)) < tolerance:
+                if np.nanmax(np.abs(f_current - f_prev)) < tolerance:
                     break
                 
                 f_prev = f_current
                 iteration += 1
-            _traces.append(f_current)
+            _traces.append([fit_y[mask], f_current[mask]])
+            # _masks.append(mask)
         # traces = np.array(sorted(traces, key=lambda x: x[len(x)//2]))
-        self.x = _traces
+        self.y = [trace[0] for trace in _traces]
+        self.x = [trace[1] for trace in _traces]
         self.traces = [np.array([y, x]) for y, x in zip(self.y, self.x)]
 
     def adjust_traces(self, frame, fit_width=35, max_iterations=100, tolerance=1e-3, mute=True):
@@ -1225,11 +1230,13 @@ def extract_orders_with_trace(frame, traces, remove_background=False):
     
     if upper_limit > xlen:
         offset = int(np.ceil(upper_limit))
-        buffer = np.zeros((ylen, offset))
+        # buffer = np.zeros((ylen, offset))
+        buffer = np.full((ylen, offset), np.nan)
         frame = np.concatenate((frame, buffer), axis=1)
     if lower_limit < 0:
         offset = int(-1*np.floor(lower_limit))
-        buffer = np.zeros((ylen, offset))
+        # buffer = np.zeros((ylen, offset))
+        buffer = np.full((ylen, offset), np.nan)
         frame = np.concatenate((buffer, frame), axis=1)
     else:
         offset = 0
@@ -1249,7 +1256,7 @@ def extract_orders_with_trace(frame, traces, remove_background=False):
         #         print(len(row))
         if remove_background: extracted_order_img = remove_order_background(extracted_order_img, n_pix=remove_background)
         extracted_order_imgs.append(extracted_order_img)
-        extracted_orders.append(np.sum(extracted_order_img, axis=1))
+        extracted_orders.append(np.sum(extracted_order_img, axis=1)) # purposfully propagating nans to drop incomplete rows
         # i+=1
     # extracted_orders = np.array(extracted_orders, dtype=np.float64)
     # padding solves shape issue?
@@ -1608,7 +1615,7 @@ def get_master_mmap(file_list, master_type, data_path, date, arm, amp_mode):
     for i, file_name in enumerate(file_list):
         fits_image_filename = os.path.join(data_path, date, data_sub_dirs[arm], file_name)
         with fits.open(fits_image_filename) as hdul:
-            flat = remove_overscan_bias(hdul[0].data, hdul[0].header,arm=arm,
+            flat = remove_overscan_bias(hdul[0].data, hdul[0].header, arm=arm,
                                         amplifier_mode=amp_mode, overscan_range=32)
             mmap_file[i] = flat
 

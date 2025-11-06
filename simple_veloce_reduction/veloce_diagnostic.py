@@ -325,7 +325,7 @@ def plot_ArcTh_points_positions(pixel_positions, order_positions, mask, veloce_p
                 idx = idx[0]
                 n_used = np.sum(in_order_mask)
                 ax.text(order_positions[idx], pixel_positions[idx]+20, f"{n_used}",
-                        ha='center', va='bottom', fontsize=9, color='blue')
+                        ha='center', va='bottom', fontsize=9, color='blue', rotation=90)
 
     ax.set_xlabel('Order number')
     ax.set_ylabel('Echelle Dispersion [pixel]')
@@ -333,10 +333,9 @@ def plot_ArcTh_points_positions(pixel_positions, order_positions, mask, veloce_p
     # Force x-ticks to be integers only
     ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
     # Shrink the box and move legend outside the plot
-    box = ax.get_position()
-    ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
-    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    ax.legend()
+    # box = ax.get_position()
+    # ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
+    ax.legend(loc='lower left')
     plt.tight_layout()
     if filename is not None:
         output_file = os.path.join(veloce_paths.plot_dir,
@@ -432,12 +431,12 @@ def plot_ArcTh_residuals(residuals, order_positions, pixel_positions, wave_posit
 
     axes[0,0].scatter(pixel_positions[~mask], _residuals[~mask], c='r', s=10, marker='x', alpha=0.7, label='Residuals of rejected lines')
     axes[0,0].scatter(pixel_positions[mask], _residuals[mask], c='k', s=10, label='Residuals of fitted lines')
-    axes[0,0].legend()
+    axes[0,0].legend(loc='lower center')
     axes[1,0].scatter(pixel_positions[mask], _residuals[mask], c='k', s=10, label='Residuals')
     axes[1,0].plot(dispersion_bin_pos, dispersion_binned_mean, c='r', label='Residual mean (binned)')
     axes[1,0].axhline(rmse, color='blue', ls='--')
     axes[1,0].axhline(-1*rmse, color='blue', ls='--')
-    axes[1,0].legend()
+    axes[1,0].legend(loc='upper center')
     ylim = axes[1,0].get_ylim()
     xlim = axes[1,0].get_xlim()
     x_pos = xlim[1] - 0.02 * (xlim[1] - xlim[0])
@@ -446,12 +445,12 @@ def plot_ArcTh_residuals(residuals, order_positions, pixel_positions, wave_posit
 
     axes[0,1].scatter(order_positions[~mask], _residuals[~mask], c='r', s=10, marker='x', alpha=0.7, label='Residuals of rejected lines')
     axes[0,1].scatter(order_positions[mask], _residuals[mask], c='k', s=10, label='Residuals of fitted lines')
-    axes[0,1].legend()
+    axes[0,1].legend(loc='lower center')
     axes[1,1].scatter(order_positions[mask], _residuals[mask], c='k', s=10, label='Residuals')
     axes[1,1].plot(np.unique(order_positions), per_order_residual_mean, c='r', label='Residual mean per order')
     axes[1,1].axhline(rmse, color='blue', ls='--')
     axes[1,1].axhline(-1*rmse, color='blue', ls='--')
-    axes[1,1].legend()
+    axes[1,1].legend(loc='upper center')
     ylim = axes[1,1].get_ylim()
     xlim = axes[1,1].get_xlim()
     x_pos = xlim[1] - 0.02 * (xlim[1] - xlim[0])
