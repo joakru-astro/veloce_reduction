@@ -888,6 +888,7 @@ def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, offset=0, plot=
     - Duplicate pixel positions (blends) are removed from the output.
     - The function prints diagnostic messages for lines that fail selection or fitting.
     """
+    from matplotlib.ticker import MaxNLocator
     ### need different conditions for each arm
     if arm == 'green':
         lines = get_lines_in_order(wavelengths, linelist, elements=['Th'], intensity_threshold=200, flag=['1'])
@@ -1001,19 +1002,22 @@ def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, offset=0, plot=
             popt, _ = curve_fit(general_gaussian, x_fit_masked, y_fit_masked, p0=p0, bounds=bounds)
             if plot:
                 plt.close('all')
-                plt.plot(x_fit, y_fit, 'b-', label='Data')
-                plt.scatter(x_fit_masked, y_fit_masked, c='k', s=5, label='Line points')
+                fig, ax = plt.subplots()
+                ax.plot(x_fit, y_fit, 'C0-', label='Data')
+                # plt.scatter(x_fit_masked, y_fit_masked, c='k', s=5, label='Line points')
+                ax.scatter(x_fit_masked, y_fit_masked, c='C0', s=5)
                 x_fine = np.arange(x_fit_masked.min(), x_fit_masked.max()+0.1, 0.1)
-                plt.plot(x_fine, general_gaussian(x_fine, *popt), 'r-', label='Fit')
-                plt.axvline(line_pixel, c='orange', ls=':', label='Line guess')
-                plt.axvline(center, c='green', ls=':', label='Closest peak')
-                plt.axvline(popt[1], c='red', ls=':', label='Fit center')
-                plt.title(f"Line {line_wave:.3f} nm")
-                plt.xlim(x_fit.min(), x_fit.max())
-                plt.ylim(min(0.7, y_fit.min()*0.9), general_gaussian(x_fine, *popt).max()*1.1)
-                plt.xlabel('Pixel')
-                plt.ylabel('Flux')
-                plt.legend()
+                ax.plot(x_fine, general_gaussian(x_fine, *popt), 'r-', label='Fit')
+                # plt.axvline(line_pixel, c='orange', ls=':', label='Line guess')
+                # plt.axvline(center, c='green', ls=':', label='Closest peak')
+                # plt.axvline(popt[1], c='red', ls=':', label='Fit center')
+                ax.set_title(f"Line {line_wave:.3f} nm")
+                ax.set_xlim(x_fit.min(), x_fit.max())
+                ax.set_ylim(min(0.7, y_fit.min()*0.9), general_gaussian(x_fine, *popt).max()*1.1)
+                ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+                ax.set_xlabel('Pixel')
+                ax.set_ylabel('Flux')
+                # plt.legend()
                 plt.show()
             passed_mask.append(True)
             lines_pixel_positions.append(popt[1])
