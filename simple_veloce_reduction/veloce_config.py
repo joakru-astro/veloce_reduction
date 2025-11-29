@@ -14,14 +14,14 @@ class VelocePaths:
         self.reduction_parent_dir = os.path.dirname(os.path.abspath(__file__))
         
         if input_dir is not None:
-            input_dir = os.path.abspath(input_dir)
+            input_dir = os.path.abspath(os.path.expanduser(input_dir))
             if not os.path.exists(input_dir):
                 raise FileNotFoundError(f"Input path does not exist: {input_dir}")
             else:
                 self.input_dir = input_dir
 
         if output_dir is not None:
-            output_dir = os.path.abspath(output_dir)
+            output_dir = os.path.abspath(os.path.expanduser(output_dir))
             if not os.path.exists(output_dir):
                 # raise FileNotFoundError(f'Output path does not exist: {output_dir}')
                 os.makedirs(output_dir)
@@ -55,35 +55,35 @@ class VelocePaths:
         paths = cls(config['input_dir'], config['output_dir'])
 
         if config['wave_dir'] != 'Default':
-            paths.wave_dir = os.path.abspath(config['wave_dir'])
+            paths.wave_dir = os.path.abspath(os.path.expanduser(config['wave_dir']))
         if config['trace_dir'] != 'Default':
-            paths.trace_dir = os.path.abspath(config['trace_dir'])
+            paths.trace_dir = os.path.abspath(os.path.expanduser(config['trace_dir']))
 
         nondefault_dirs = True
         if config['master_dir'] != 'Default':
             os.rmdir(os.path.join(paths.intermediate_dir, 'Master'))
-            paths.master_dir = os.path.abspath(config['master_dir'])
+            paths.master_dir = os.path.abspath(os.path.expanduser(config['master_dir']))
             if not os.path.exists(paths.master_dir):
                 os.makedirs(paths.master_dir)
         else:
             nondefault_dirs = False
         if config['wavelength_calibration_dir'] != 'Default':
             os.rmdir(os.path.join(paths.intermediate_dir, 'Wavelength_calibration'))
-            paths.wavelength_calibration_dir = os.path.abspath(config['wavelength_calibration_dir'])
+            paths.wavelength_calibration_dir = os.path.abspath(os.path.expanduser(config['wavelength_calibration_dir']))
             if not os.path.exists(paths.wavelength_calibration_dir):
                 os.makedirs(paths.wavelength_calibration_dir)
         else:
             nondefault_dirs = False
         if config['trace_shift_dir'] != 'Default':
             os.rmdir(os.path.join(paths.intermediate_dir, 'Trace_shifts'))
-            paths.trace_shift_dir = os.path.abspath(config['trace_shift_dir'])
+            paths.trace_shift_dir = os.path.abspath(os.path.expanduser(config['trace_shift_dir']))
             if not os.path.exists(paths.trace_shift_dir):
                 os.makedirs(paths.trace_shift_dir)
         else:
             nondefault_dirs = False
         if config['plot_dir'] != 'Default':
             os.rmdir(os.path.join(paths.intermediate_dir, 'Plots'))
-            paths.plot_dir = os.path.abspath(config['plot_dir'])
+            paths.plot_dir = os.path.abspath(os.path.expanduser(config['plot_dir']))
             if not os.path.exists(paths.plot_dir):
                 os.makedirs(paths.plot_dir)
         else:
@@ -177,17 +177,17 @@ def validate_config(config):
         pass
         # raise ValueError('science_targets must be "Default", a list of target names, or a valid path to a target list file.')
     # validate input paths
-    if not os.path.exists(os.path.abspath(config['input_dir'])):
-        raise FileNotFoundError(f'{os.path.abspath(config["input_dir"])} does not exist.')
-    if config['reduce'] == 'night' and not os.path.exists(os.path.abspath(os.path.join(config['input_dir'], config['date']))):
-        raise FileNotFoundError(f'{config["date"]} does not exist in {os.path.abspath(config["input_dir"])}')
+    if not os.path.exists(os.path.abspath(os.path.expanduser(config['input_dir']))):
+        raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["input_dir"]))} does not exist.')
+    if config['reduce'] == 'night' and not os.path.exists(os.path.abspath(os.path.join(os.path.expanduser(config['input_dir']), config['date']))):
+        raise FileNotFoundError(f'{config["date"]} does not exist in {os.path.abspath(os.path.expanduser(config["input_dir"]))}')
     # if not os.path.exists(os.path.abspath(config['output_dir'])):
     #     raise FileNotFoundError(f'{os.path.abspath(config["output_dir"])} does not exist.')
     # validate internal paths
-    if config['wave_dir'] != 'Default' and not os.path.exists(os.path.abspath(config['wave_dir'])):
-        raise FileNotFoundError(f'{os.path.abspath(config["wave_dir"])} does not exist.')
-    if config['trace_dir'] != 'Default' and not os.path.exists(os.path.abspath(config['trace_dir'])):
-        raise FileNotFoundError(f'{os.path.abspath(config["trace_dir"])} does not exist.')
+    if config['wave_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['wave_dir']))):
+        raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["wave_dir"]))} does not exist.')
+    if config['trace_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['trace_dir']))):
+        raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["trace_dir"]))} does not exist.')
     
     return True
 
