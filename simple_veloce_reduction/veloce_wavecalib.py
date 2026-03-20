@@ -408,7 +408,7 @@ def load_reference_Th_spectrum(arm, veloce_paths):
 #             hdr = hdul[0].header
 #     else:
 #         master_flat, hdr = veloce_reduction_tools.get_master_mmap(
-#             obs_list, f"flat_{arm}", veloce_paths.input_dir,
+#             obs_list, veloce_paths.input_dir,
 #             date, arm, amplifier_mode)
 #         master_flat, hdr = veloce_reduction_tools.normalise_flat(master_flat, hdr)
 #         veloce_reduction_tools.save_image_fits(master_flat_filename, master_flat, hdr)
@@ -1266,7 +1266,7 @@ def get_arcTh_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, fil
             file_list = veloce_reduction_tools.get_longest_consecutive_files(file_list)
             if file_list:
                 arcTh_image, hdr = veloce_reduction_tools.get_master_mmap(
-                    file_list, f'ARC-ThAr_{arm}_master', veloce_paths.input_dir, date, arm, amplifier_mode)
+                    file_list, veloce_paths.input_dir, date, arm, amplifier_mode)
                 veloce_reduction_tools.save_image_fits(arcTh_master_filename, arcTh_image, hdr)
             else:
                 raise FileNotFoundError(f"No ARC-ThAr_{arm} files found for date {date}. Cannot create master.")
@@ -1389,7 +1389,7 @@ def get_LC_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, filena
             file_list = veloce_reduction_tools.get_longest_consecutive_files(file_list)
             if file_list:
                 LC_image, hdr = veloce_reduction_tools.get_master_mmap(
-                    file_list, f'SimLC_{arm}_master', veloce_paths.input_dir, date, arm, amplifier_mode)
+                    file_list, veloce_paths.input_dir, date, arm, amplifier_mode)
                 veloce_reduction_tools.save_image_fits(LC_master_filename, LC_image, hdr)
             else:
                 raise FileNotFoundError(f"No SimLC files found for date {date}. Cannot create master.")

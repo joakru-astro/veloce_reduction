@@ -51,7 +51,7 @@ def get_trace_shift(traces, veloce_paths, arm, amplifier_mode, sim_calib, obs_li
             file_list = obs_list[f'flat_{arm}'][date]
             file_list = veloce_reduction_tools.get_longest_consecutive_files(file_list)
             master_flat, hdr = veloce_reduction_tools.get_master_mmap(
-                file_list, f"flat_{arm}", veloce_paths.input_dir,
+                file_list, veloce_paths.input_dir,
                 date, arm, amplifier_mode)
             veloce_reduction_tools.save_image_fits(master_flat_filename, master_flat, hdr)
     
@@ -106,7 +106,7 @@ def get_flat(veloce_paths, arm, amplifier_mode, date, obs_list):
         file_list = obs_list[f'flat_{arm}'][date]
         file_list = veloce_reduction_tools.get_longest_consecutive_files(file_list)
         master_flat, hdr = veloce_reduction_tools.get_master_mmap(
-            file_list, f"flat_{arm}", veloce_paths.input_dir,
+            file_list, veloce_paths.input_dir,
             date, arm, amplifier_mode)
         norm_flat, hdr = veloce_reduction_tools.normalise_flat(master_flat, hdr)
         veloce_reduction_tools.save_image_fits(master_flat_filename, master_flat, hdr)

@@ -593,7 +593,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         q1_overscan_mask[ydiv:,:overscan_range] = 1
         q1_overscan_mask[ylen-overscan_range:,:xdiv] = 1
         q1 -= np.median(frame[q1_overscan_mask == 1])
-        q1[q1 < 0] = 0
+        # q1[q1 < 0] = 0
         q1_gain = gain
         # print(f'Gain for quadrant 1: {q1_gain}')
         q1 /= q1_gain
@@ -608,7 +608,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         q2_overscan_mask[:ydiv,:overscan_range] = 1
         q2_overscan_mask[:overscan_range,:xdiv] = 1
         q2 -= np.median(frame[q2_overscan_mask == 1])
-        q2[q2 < 0] = 0
+        # q2[q2 < 0] = 0
         # q2_gain = float(hdr['DETA1GN'])
         q2_gain = q1_gain * gain_ratio_q2_q1
         # print(f'Gain for quadrant 2: {q2_gain}')
@@ -624,7 +624,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         q3_overscan_mask[:ydiv,xlen-overscan_range:] = 1
         q3_overscan_mask[:overscan_range,xdiv:] = 1
         q3 -= np.median(frame[q3_overscan_mask == 1])
-        q3[q3 < 0] = 0
+        # q3[q3 < 0] = 0
         # q3_gain = float(hdr['DETA3GN'])
         q3_gain = q1_gain * gain_ratio_q4_q1 * gain_ratio_q3_q4
         # print(f'Gain for quadrant 3: {q3_gain}')
@@ -640,7 +640,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         q4_overscan_mask[ydiv:,xlen-overscan_range:] = 1
         q4_overscan_mask[ylen-overscan_range:,xdiv:] = 1
         q4 -= np.median(frame[q4_overscan_mask == 1])
-        q4[q4 < 0] = 0
+        # q4[q4 < 0] = 0
         # q4_gain = float(hdr['DETA4GN'])
         q4_gain = q1_gain * gain_ratio_q4_q1
         # print(f'Gain for quadrant 4: {q4_gain}')
@@ -670,7 +670,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         h1_overscan_mask[:overscan_range,:xdiv] = 1
         h1_overscan_mask[ylen-overscan_range:,:xdiv] = 1
         h1 -= np.median(frame[h1_overscan_mask == 1])
-        h1[h1 < 0] = 0
+        # h1[h1 < 0] = 0
         h1_gain = float(hdr['DETA1GN'])
         # print(f'Gain for half 1: {h1_gain}')
         h1 /= h1_gain
@@ -685,7 +685,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         h2_overscan_mask[ylen-overscan_range:,xdiv:] = 1
         h2_overscan_mask[ylen-overscan_range:,xdiv:] = 1
         h2 -= np.median(frame[h2_overscan_mask == 1])
-        h2[h2 < 0] = 0
+        # h2[h2 < 0] = 0
         # h2_gain = float(hdr['DETA2GN'])
         h2_gain = h1_gain * gain_ratio
         # print(f'Gain for half 2: {h2_gain}')
@@ -1571,7 +1571,7 @@ def get_longest_consecutive_files(file_list):
         longest = current[:]
     return longest
 
-def get_master_mmap(file_list, master_type, data_path, date, arm, amp_mode):
+def get_master_mmap(file_list, data_path, date, arm, amp_mode):
     """
     Generates a master frame by median combining individual frames for a given observation type and date using memory-mapped files.
 
