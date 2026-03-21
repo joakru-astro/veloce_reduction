@@ -3,7 +3,7 @@ import pickle
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import median_filter, label, find_objects, zoom
+from scipy.ndimage import median_filter, gaussian_filter, label, find_objects, zoom
 from scipy.interpolate import RBFInterpolator
 from scipy.signal import find_peaks
 from csaps import csaps
@@ -901,7 +901,7 @@ def get_orders_masks(binarized):
     orders = np.array(orders, dtype=np.uint16)
     return orders
 
-def fit_background(frame, traces, x_range=5, y_step=20, kernel='thin_plate_spline', smoothing=1, downsample_factor=0.1):
+def fit_background(frame, traces, x_range=3, y_range=3, y_step=20, kernel='thin_plate_spline', smoothing=1, downsample_factor=0.1):
     """
     Fit the background of a given frame using radial basis function (RBF) interpolation.
     
@@ -909,6 +909,7 @@ def fit_background(frame, traces, x_range=5, y_step=20, kernel='thin_plate_splin
     - frame (numpy.ndarray): The 2D array representing the image frame from which the background is to be extracted.
     - traces (object): An object containing the trace information.
     - x_range (int, optional): The range around each trace position to consider for fitting. Default is 5 pixels.
+    - y_range (int, optional): The range around each trace position to consider for fitting. Default is 5 pixels.
     - y_step (int, optional): The step size for sampling the traces. Default is 20.
     - kernel (str, optional): The kernel to use for the RBF interpolation. Default is 'thin_plate_spline'.
     - smoothing (float, optional): The smoothing factor for the RBF interpolation. Default is 1.
@@ -917,16 +918,8 @@ def fit_background(frame, traces, x_range=5, y_step=20, kernel='thin_plate_splin
     Returns:
     - numpy.ndarray: The 2D array representing the fitted background of the same shape as the input frame.
     """
-    # # verify x_range
-    # for i in range(len(traces)-1):
-    #     if np.any((traces.x[i][::y_step]+traces.x[i+1][::y_step])/2+x_range>traces.x[i+1]-traces.summing_ranges_lower) or np.any((traces.x[i][::y_step]+traces.x[i+1][::y_step])/2-x_range>traces.x[i]+traces.summing_ranges_upper):
-    #        raise ValueError(f'x_range = {x_range} is too large for the given traces.')
-    # # verify y_step
-    # if frame.shape[0]/y_step < 100:
-    #     raise ValueError(f'y_step = {y_step} is too big for the frame resulting grid is too sparse.')
-    
     # Extract the background values and coordinates
-    background_values = [[np.nanmedian(frame[int(y), int((x1+x2)/2-x_range):int((x1+x2)/2+x_range)]) for y, x1, x2 in zip(traces.y[i][::y_step], traces.x[i][::y_step], traces.x[i+1][::y_step])] for i in range(len(traces)-1)]
+    background_values = [ [ np.nanmedian(frame[int(y-y_range):int(y+y_range), int((x1+x2)/2-x_range):int((x1+x2)/2+x_range)]) if len(frame[int(y-y_range):int(y+y_range), int((x1+x2)/2-x_range):int((x1+x2)/2+x_range)])!=0 or np.any(np.isnan(frame[int(y-y_range):int(y+y_range), int((x1+x2)/2-x_range):int((x1+x2)/2+x_range)])) else 0 for y, x1, x2 in zip(traces.y[i][::y_step], traces.x[i][::y_step], traces.x[i+1][::y_step])] for i in range(len(traces)-1)]
     background_values = np.hstack(background_values)
     background_points = [[(y, (x1+x2)/2) for y, x1, x2 in zip(traces.y[i][::y_step], traces.x[i][::y_step], traces.x[i+1][::y_step])] for i in range(len(traces)-1)]
     background_points = np.vstack(background_points)
@@ -947,7 +940,11 @@ def fit_background(frame, traces, x_range=5, y_step=20, kernel='thin_plate_splin
     background = zoom(downsampled_background, (grid_shape[0] / downsampled_shape[0], grid_shape[1] / downsampled_shape[1]), order=1)
     background[background < 0] = 0
 
-    return background    
+    # smooth
+    background = gaussian_filter(background, (300,100))
+    # background = gaussian_filter(background, 100)
+
+    return background     
 
 ### old version
 # def get_orders_masks(binarized):
