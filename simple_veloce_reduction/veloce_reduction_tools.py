@@ -451,6 +451,18 @@ class Traces:
         return np.array(lower), np.array(upper)
     
     def adjust_traces_with_ccf(self, frame, arm):
+        """
+        Adjusts the trace positions based on the cross-correlation function (CCF) with a reference template.
+        
+        Parameters:
+        - frame (numpy.ndarray): 2D array representing the image frame.
+        - arm (str): The arm of the instrument (e.g., 'blue', 'red') to determine which template to use for cross-correlation.
+
+        Returns:
+        - shift (float): The determined shift in pixels to adjust the traces.
+        - pix_shift (numpy.ndarray): The array of pixel corresponding to the CCF.
+        - ccf (numpy.ndarray): The cross-correlation function values.
+        """
         shift, pix_shift, ccf = self.determine_trace_shift_template(frame, arm=arm)
         if np.isnan(shift):
             print('Could not determine trace shift, not adjusting traces.')

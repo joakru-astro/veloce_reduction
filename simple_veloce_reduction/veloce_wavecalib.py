@@ -31,6 +31,13 @@ OFFSET_FREQUENCY = 9.56e9  # Hz
 def pad_array(array, ref_pixel):
     """
     Pad an array to create 2D array with the size matching min and max of reference pixels.
+
+    Parameters:
+    - array (list of numpy.ndarray): The list of 1D arrays to be padded.
+    - ref_pixel (list of numpy.ndarray): The list of reference pixel arrays.
+
+    Returns:
+    - padded_array (numpy.ndarray): The 2D array after padding.
     """
     lower_bound = min([np.nanmin(order) for order in ref_pixel])
     upper_bound = max([np.nanmax(order) for order in ref_pixel])
@@ -44,6 +51,16 @@ def pad_array(array, ref_pixel):
 def load_LC_wave_reference(veloce_paths, arm):
     """
     Load the wavelength calibration for the LC.
+
+    Parameters:
+    - veloce_paths (object): An object containing the paths to the data directories.
+    - arm (str): The arm of the spectrograph ('red', 'green', or 'blue').
+
+    Returns:
+    - ref_orders (numpy.ndarray): The array of reference orders.
+    - ref_wave (list of numpy.ndarray): The list of reference wavelengths.
+    - ref_intensity (list of numpy.ndarray): The list of reference intensities.
+    - ref_pixel (list of numpy.ndarray): The list of reference pixels.
     """
     lc_wave_calib_file = os.path.join(veloce_paths.wave_dir, f'{arm.upper()}_LC_SPEC-26aug{arm_nums[arm]}0083.txt')
 
@@ -68,6 +85,22 @@ def load_LC_wave_reference(veloce_paths, arm):
 def load_simultanous_LC(image, veloce_paths, hdr, arm, traces=None, ref_orders=None, ref_pixel=None):
     """
     Load simultaneous laser comb observations.
+
+    Parameters:
+    - image (numpy.ndarray): Image (2D array) containing the simultaneous laser comb data.
+    - veloce_paths (object): An object containing the paths to the data directories.
+    - hdr (astropy.io.fits.Header): The header.
+    - arm (str): The arm of the spectrograph ('red', 'green', or 'blue').
+    - traces (object, optional): An object containing traces for LC.
+    If None, default traces for the arm will be loaded.
+    - ref_orders (numpy.ndarray, optional): The array of reference orders.
+    - ref_pixel (list of numpy.ndarray, optional): The list of reference pixel arrays.
+
+    Returns:
+    - extracted_LC (list of numpy.ndarray): The list of extracted laser comb orders.
+    - extracted_pixel (list of numpy.ndarray): The list of extracted pixel arrays.
+    - order_slice (slice): The slice for selecting the relevant orders.
+    - pixel_slices (numpy.ndarray): The array of slices for selecting the relevant pixels.
     """
     if hdr is not None and (hdr['FREQREF'] != REPETITION_RATE and hdr['FOFFFREQ'] != OFFSET_FREQUENCY):
         raise ValueError("Repetition rate and offset frequency do not match the values of LC solution.")
@@ -117,9 +150,36 @@ def load_simultanous_LC(image, veloce_paths, hdr, arm, traces=None, ref_orders=N
 #     return pix_shift, np.array(ccf)
 
 def general_gaussian(x, A, mu, sigma, beta, baseline):
+    """
+    Generalized Gaussian function.
+    
+    Parameters:
+    - x (numpy.ndarray): The independent variable (e.g., pixels).
+    - A (float): Amplitude of the peak.
+    - mu (float): Mean of the peak.
+    - sigma (float): Standard deviation of the peak.
+    - beta (float): Shape parameter of the generalized Gaussian.
+    - baseline (float): Baseline level.
+
+    Returns:
+    - (numpy.ndarray): The values of the generalized Gaussian function at each point in x.
+    """
     return A * np.exp(-np.abs(((x - mu)/(np.sqrt(2)*sigma)))**beta) + baseline
 
 def fit_lc_peak(pix_shift, ccf, fitting_limit=None):
+    """
+    Fit the peak of the cross-correlation function (CCF) to determine the pixel shift.
+    
+    Parameters:
+    - pix_shift (numpy.ndarray): The pixel axis for the CCF.
+    - ccf (numpy.ndarray): The cross-correlation function values.
+    - fitting_limit (float, optional): How far to look for the peak. If None, it will be calculated automatically.
+
+    Returns:
+    - (float): The fitted pixel shift corresponding to the peak of the CCF.
+    - (list): The fitted parameters of the generalized Gaussian function (A, mu, sigma, beta, baseline).
+    - (float): Fitting limit.
+    """
     ccf_mask = np.isfinite(ccf)
     # if len(pix_shift) == 0 or len(ccf) == 0:
     if np.sum(ccf_mask) < 10:
@@ -168,6 +228,18 @@ def fit_lc_peak(pix_shift, ccf, fitting_limit=None):
 def calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_pixel, number_of_parts=8, mode='LC', plot=False, veloce_paths=None, filename=None):
     """
     Calculate the cross-correlation function (CCF) for each order of the laser comb.
+
+    Parameters:
+    - ref_orders (numpy.ndarray): The array of reference orders.
+    - ref_intensity (list of numpy.ndarray): The list of reference intensities.
+    - ref_pixel (list of numpy.ndarray): The list of reference pixels.
+    - lc_intensity (list of numpy.ndarray): The list of observed laser comb intensities.
+    - lc_pixel (list of numpy.ndarray): The list of observed laser comb pixels.
+    - number_of_parts (int, optional): The number of parts to split the data into for CCF calculation. Default is 8.
+    - mode (str, optional): The mode for fitting the peak. Default is 'LC'.
+    - plot (bool, optional): Whether to plot the results. Default is False.
+    - veloce_paths (list of str, optional): The paths for the Veloce data. Default is None.
+    - filename (str, optional): The filename for the plot. Default is None.
     """
     CCF = [
         [
@@ -239,6 +311,22 @@ def fit_surface(dispersion_position, orders_position, offset_array, extracted_pi
     Fit a surface to the offset map using least squares.
 
     Fitting procedure inspired by: https://gist.github.com/amroamroamro/1db8d69b4b65e8bc66a6
+
+    Parameters:
+    - dispersion_position (numpy.ndarray): The array of dispersion positions.
+    - orders_position (numpy.ndarray): The array of order positions.
+    - offset_array (numpy.ndarray): The array of offsets.
+    - extracted_pixels (numpy.ndarray): The array of extracted pixel positions for each order to calculate the surface.
+    - degree (int, optional): The degree of the polynomial surface to fit (1 for linear, 2 for quadratic, 3 for cubic). Default is 1.
+    - plot (bool, optional): Whether to plot the fitted surface and residuals. Default is False.
+    - veloce_paths (list of str, optional): The paths for the Veloce data. Default is None.
+    - filename (str, optional): The filename for the plot. Default is None.
+
+    Returns:
+    - Z (numpy.ndarray): The fitted surface values at the extracted pixel positions.
+    - C (numpy.ndarray): The coefficients of the fitted surface.
+    - data (numpy.ndarray): The filtered data points used for fitting.
+    - residuals (numpy.ndarray): The residuals of the fitted surface.
     """
     
     data = np.array([(x, y, z) for x, y, z in zip(dispersion_position.flatten(), orders_position.flatten(), offset_array.flatten())])
@@ -301,6 +389,15 @@ def fit_surface(dispersion_position, orders_position, offset_array, extracted_pi
 def interpolate_offsets_optimised(extracted_pixels, offsets, ref_wave, ref_pixel):
     """
     Interpolate wavelenght using pixel offsets.
+
+    Parameters:
+    - extracted_pixels (numpy.ndarray): The array of extracted pixel positions for each order.
+    - offsets (numpy.ndarray): The array of pixel offsets.
+    - ref_wave (numpy.ndarray): The array of reference wavelengths.
+    - ref_pixel (numpy.ndarray): The array of reference pixel positions.
+
+    Returns:
+    - new_wave (numpy.ndarray): The array of new wavelengths corresponding to the extracted pixel positions after applying the offsets.
     """
     # offset pixels
     new_pixels = extracted_pixels - offsets
@@ -312,6 +409,14 @@ def interpolate_offsets_optimised(extracted_pixels, offsets, ref_wave, ref_pixel
 def estimate_calibration_precision(residuals, order, ref_wave):
     """
     Estimate the calibration precision.
+
+    Parameters:
+    - residuals (numpy.ndarray): The array of residuals from the surface fitting.
+    - order (int): The order for which to estimate the calibration precision.
+    - ref_wave (numpy.ndarray): The array of reference wavelengths.
+
+    Returns:
+    - calibration_precision (float): The estimated calibration precision in m/s.
     """
     # c = 2.99792458e8  # Speed of light in m/s
     # Calculate the standard deviation of the residuals
@@ -329,6 +434,16 @@ def estimate_calibration_precision(residuals, order, ref_wave):
     return calibration_precision
 
 def apply_wavelength_shift(wave, arm, veloce_paths):
+    """
+    Apply the wavelength shift to the spectrum based on the predetermined velocity offsets for each arm.
+    Parameters:
+    - wave (numpy.ndarray): The array of wavelengths to be shifted.
+    - arm (str): The arm of the spectrograph ('red', 'green', or 'blue').
+    - veloce_paths (object): An object containing the paths to the data directories.
+    
+    Returns:
+    - wave (numpy.ndarray): The array of wavelengths after applying the shift.
+    """
     # Apply the wavelength shift to the spectrum
     shifts = np.load(os.path.join(veloce_paths.wave_dir, f'{arm}_velocity_orders_offsets.npy'))
     if len(wave) != len(shifts):
@@ -342,6 +457,23 @@ def apply_wavelength_shift(wave, arm, veloce_paths):
     return wave
 
 def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, traces=None, plot=False, filename=None):
+    """
+    Calibrate the wavelength solution for the simultaneous laser comb observations using CCF.
+    
+    Parameters:
+    - extracted_science_orders (list of numpy.ndarray): The list of extracted science orders to be calibrated.
+    - veloce_paths (object): An object containing the paths to the data directories.
+    - lc_image (numpy.ndarray): Image (2D array) containing the simultaneous laser comb data.
+    - hdr (astropy.io.fits.Header): The header of the LC image.
+    - arm (str): The arm of the spectrograph ('red', 'green', or 'blue').
+    - traces (object, optional): An object containing traces for LC. If None, default traces for the arm will be loaded.
+    - plot (bool, optional): Whether to plot the intermediate results. Default is False.
+    - filename (str, optional): The filename for the plots. Default is None.
+    
+    Returns:
+    - wave (numpy.ndarray): The array of calibrated wavelengths.
+    - extracted_science_orders (list of numpy.ndarray): The list of extracted science orders trimmed to calibrated range.
+    """
     if arm == 'blue':
         raise NotImplementedError("Blue arm is not supported for LC calibration.")
         # print("[warning] Blue arm is not supported for LC calibration.")
@@ -386,12 +518,31 @@ def interpolate_wave(orders, hdr):
     raise NotImplementedError
 
 def load_static_Th_wavelength_solution(arm, veloce_paths, traces):
+    """
+    Load the static wavelength solution for the ThAr calibration.
+    Parameters:
+    - arm (str): The arm of the spectrograph ('red', 'green', or 'blue').
+    - veloce_paths (object): An object containing the paths to the data directories.
+    - traces (object): A trace object (same as science fibres).
+    Returns:
+    - wave (numpy.ndarray): The array of wavelengths corresponding to the ThAr calibration.
+    """
     wave = pickle.load(open(os.path.join(veloce_paths.wave_dir, f'ThXe_wave_230826_{arm}.pkl'), 'rb'))
     for w, trace_y in zip(wave, traces.y):
         assert len(w) == len(trace_y), "Size missmatch between used trace and static wavelength solution."
     return wave
 
 def load_reference_Th_spectrum(arm, veloce_paths):
+    """Load the reference Th spectrum for the ThAr calibration.
+    
+    Parameters:
+    - arm (str): The arm of the spectrograph ('red', 'green', or 'blue').
+    - veloce_paths (object): An object containing the paths to the data directories.
+    
+    Returns:
+    - ref_th_spectrum (numpy.ndarray): The array of flux values for the reference Th spectrum.
+    - ref_th_header (astropy.io.fits.Header): The header of the reference Th spectrum.
+    """
     ref_th_file = os.path.join(veloce_paths.wave_dir, f'Th_reference_spectrum_230828_{arm}.pkl')
     if not os.path.exists(ref_th_file):
         raise FileNotFoundError(f"Reference Th spectrum file not found: {ref_th_file}")
@@ -435,6 +586,15 @@ def append_column_to_recarray(array, column_name, column_data):
     return new_array
 
 def load_UVES_linelist(file):
+    """
+    Load the UVES ThAr linelist from a text file and convert it to a structured numpy array.
+    
+    Parameters:
+    - file: The path to the UVES linelist text file.
+    
+    Returns:
+    - data: A structured numpy array containing the linelist data with appropriate field names and types.
+    """
     # with field labels matching nist linelist
     types = np.array(['f', 'f', 'f', '<U2', '<U3', '<U1'])
     # columns = np.array(['wavenumber(cm-1)', 'air_wave(nm)', 'log_intens', 'Element', 'Ion', 'Reference'], dtype=str)
@@ -462,6 +622,18 @@ def load_UVES_linelist(file):
     return data
 
 def load_Th_linelist(veloce_paths, filename='Default', linelist_type='NIST'):
+    """
+    Load the ThAr linelist from a text file and convert it to a structured numpy array.
+    
+    Parameters:
+    - veloce_paths: The paths to the veloce data directories.
+    - filename: The name of the linelist file to load.
+    If 'Default', it will load the default linelist from the veloce_paths, which is from NIST.
+    - linelist_type: The type of linelist to load ('NIST' or 'UVES').
+
+    Returns:
+    - data: A structured numpy array containing the linelist data with appropriate field names and types.
+    """
     if linelist_type == 'NIST':
         if filename == 'Default':
             filename = 'th_linelist_NIST.pickle'
@@ -494,7 +666,7 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
     - plot: If True, generates plots to visualize the process.
 
     Returns:
-    - baseline: Normalized flux values after spline fitting.
+    - (numpy.ndarray): Normalized flux values after spline fitting.
     """
     if sum(np.isfinite(y)) < nknots:
         print("[Warning] Order length is less than number of knots. Normalisation not possible.")
@@ -793,7 +965,20 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
 def get_lines_in_order(wave, linelist, elements=None, intensity_threshold=None, flag=None):
     """
     Get the lines in the order from the linelist.
-    Wavelengths in linelist should be in air.
+
+    Parameters:
+    - wave (numpy.ndarray): 1D array of wavelengths in the order (in air).
+    - linelist (numpy.ndarray): Structured array containing the linelist with at least 'obs_wl_air(nm)' field.
+    - elements (list of str, optional): List of element symbols to filter the linelist (e.g., ['Th', 'Xe']).
+    If None, no filtering by element is applied. Default is None.
+    - intensity_threshold (int or tuple of int, optional): If int, only lines with intensity greater than or equal to this value are included.
+    If tuple (min_intensity, max_intensity), only lines with intensity within this range are included.
+    If None, no intensity filtering is applied. Default is None.
+    - flag (str or list of str, optional): If str, only lines with this intensity flag are included. If list of str, only lines with any of these flags are included.
+    If None, no filtering by intensity flag is applied. Default is None.
+
+    Returns:
+    - (numpy.ndarray): Structured array of lines from the linelist that fall within orders wavelength range and meet the specified criteria.
     """
     # Build mask for wavelength range
     mask = (linelist['obs_wl_air(nm)'] >= wave.min()) & (linelist['obs_wl_air(nm)'] <= wave.max())
@@ -822,30 +1007,41 @@ def get_lines_in_order(wave, linelist, elements=None, intensity_threshold=None, 
     # print(f"Found {np.sum(mask)} lines in the order.")
     return linelist[mask]
 
-def plot_order_with_lines(wave, thxe_order, linelist, original_solution=None):
-    plt.close('all')
-
-    plt.plot(wave, thxe_order, label='arc ThXe')
-
-    lines = get_lines_in_order(wave, linelist, intensity_threshold=100)
-    # lines = get_lines_in_order(veloce_reduction_tools.vacuum_to_air(wave[order]), nist_linelist, elements=['Th', 'Xe'], intensity_threshold=100)
-    for line in lines:
-        plt.axvline(line['obs_wl_air(nm)'], c='r', ls='--', label="linelist")
-
-    if original_solution is not None:
-        MATCH_LAM, GUESS_LAM = original_solution
-        for match_wave in MATCH_LAM:
-            plt.axvline(veloce_reduction_tools.vacuum_to_air(match_wave), c='g', ls=':', label="match_wave")
-        for guess_wave in GUESS_LAM:
-            plt.axvline(veloce_reduction_tools.vacuum_to_air(guess_wave), c='b', ls=':', label="guess_wave")
-    # Remove duplicate labels in legend
-    handles, labels = plt.gca().get_legend_handles_labels()
-    unique = dict()
-    for h, l in zip(handles, labels):
-        if l not in unique:
-            unique[l] = h
-    plt.legend(unique.values(), unique.keys())
-    plt.show()
+# def plot_order_with_lines(wave, thxe_order, linelist, original_solution=None):
+#     """
+#     Plot the ThAr order with the lines from the linelist and optionally the original solution.
+#     Parameters:
+#     - wave (numpy.ndarray): 1D array of wavelengths in the order (in air).
+#     - thxe_order (numpy.ndarray): 1D array of flux values for the ThAr order.
+#     - linelist (numpy.ndarray): Structured array containing the linelist with at least 'obs_wl_air(nm)' field.
+#     - original_solution (tuple of arrays, optional): Tuple containing (MATCH_LAM, GUESS_LAM) from the original solution to plot for comparison."""
+#
+#     Returns:
+#     - None: Displays a plot of the ThAr order with lines
+#     """
+#     plt.close('all')
+#
+#     plt.plot(wave, thxe_order, label='fibThAr')
+#
+#     lines = get_lines_in_order(wave, linelist, intensity_threshold=100)
+#     # lines = get_lines_in_order(veloce_reduction_tools.vacuum_to_air(wave[order]), nist_linelist, elements=['Th', 'Xe'], intensity_threshold=100)
+#     for line in lines:
+#         plt.axvline(line['obs_wl_air(nm)'], c='r', ls='--', label="linelist")
+#
+#     if original_solution is not None:
+#         MATCH_LAM, GUESS_LAM = original_solution
+#         for match_wave in MATCH_LAM:
+#             plt.axvline(veloce_reduction_tools.vacuum_to_air(match_wave), c='g', ls=':', label="match_wave")
+#         for guess_wave in GUESS_LAM:
+#             plt.axvline(veloce_reduction_tools.vacuum_to_air(guess_wave), c='b', ls=':', label="guess_wave")
+#     # Remove duplicate labels in legend
+#     handles, labels = plt.gca().get_legend_handles_labels()
+#     unique = dict()
+#     for h, l in zip(handles, labels):
+#         if l not in unique:
+#             unique[l] = h
+#     plt.legend(unique.values(), unique.keys())
+#     plt.show()
 
 def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, offset=0, plot=False):
     """
@@ -1106,6 +1302,18 @@ def fit_all_lines_per_order(wave, norm_extracted_Th, ORDER, traces, linelist, ar
     return pixel_positions, wave_positions, order_positions
 
 def get_pixels_for_ArcTh_fit(orders, traces):
+    """
+    Get full pixel range for all orders to extrapolate the ThAr fit onto.
+
+    Parameters:
+    - orders (list or numpy.ndarray): List of orders to generate pixel ranges for.
+    - traces (object): A trace object. 
+
+    Returns:
+    - full_pixels (numpy.ndarray): 2D array of pixel indices for each order.
+    Each row corresponds to an order and contains the pixel indices that are extractable for it.
+    """
+
     max_extracted_pixel = max([max(trace_y) for trace_y in traces.y])
     min_extracted_pixel = min([min(trace_y) for trace_y in traces.y])
     full_pixels = np.array([np.arange(min_extracted_pixel, max_extracted_pixel + 1) for _ in orders])
@@ -1113,7 +1321,20 @@ def get_pixels_for_ArcTh_fit(orders, traces):
 
 def apply_n_limit_constraint(initial_mask, orders_position, y_fit, X, model, n_limit, all_idx, residuals):
     """
-    Apply n_limit constraint to any mask, ensuring minimum points per order.
+    Apply n_limit constraint to any mask, ensuring taht each order has at least minimum points (n_limit).
+
+    Parameters:
+    - initial_mask (numpy.ndarray): Initial boolean mask of inliers.
+    - orders_position (numpy.ndarray): Order positions corresponding to each data point.
+    - y_fit (numpy.ndarray): Array of fitted wavelength values for each data point.
+    - X (numpy.ndarray): Design matrix used for fitting the model.
+    - model (sklearn estimator): The fitted model used to predict wavelength values.
+    - n_limit (int): Minimum number of points required per order.
+    - all_idx (numpy.ndarray): Array of all indices corresponding to the data points.
+    - residuals (numpy.ndarray): Array of residuals for each data point.
+
+    Returns:
+    - constrained_mask (numpy.ndarray): Boolean mask meeting the n_limit constraint.
     """
     constrained_mask = np.zeros_like(initial_mask, dtype=bool)
     
@@ -1144,7 +1365,25 @@ def apply_n_limit_constraint(initial_mask, orders_position, y_fit, X, model, n_l
 def fit_surface_sklearn(dispersion_position, orders_position, wave_array, extracted_pixels, degree=7, sigma_clip=3, robust=False, n_limit=0, seed=None, max_iter=1000):
     """
     Fit a bivariate polynomial surface to the wavelength solution using RANSAC for outlier rejection.
-    Returns fitted surface, residuals, and inlier mask.
+    
+    Parameters:
+    - dispersion_position (numpy.ndarray): Array of pixel positions along the dispersion direction for each fitted line.
+    - orders_position (numpy.ndarray): Array of order numbers corresponding to each fitted line.
+    - wave_array (numpy.ndarray): Array of wavelength values corresponding to each fitted line.
+    - extracted_pixels (numpy.ndarray): 2D array of pixel indices for each order to extrapolate the fit onto.
+    - degree (int): Degree of the polynomial surface to fit.
+    - sigma_clip (float): Sigma threshold for iterative outlier rejection.
+    - robust (bool): If True, use RANSAC for robust fitting. If False, use standard least squares fitting.
+    - n_limit (int): Minimum number of points required per order to be considered in the fit. If 0, no minimum is enforced.
+    - seed (int or None): Random seed for RANSAC reproducibility. If None, RANSAC will use a random seed.
+    - max_iter (int): Maximum number of iterations for the sigma clipping process.
+    
+    Returns:
+    - fitted surface (numpy.ndarray): 2D array of fitted wavelength values for each pixel in the extracted_pixels grid.
+    - residuals (numpy.ndarray): Array of residuals between the fitted surface and the input wavelength values for each data point.
+    - mask (numpy.ndarray): Boolean array indicating which data points were considered inliers after sigma clipping or RANSAC.
+    - model (sklearn estimator): The fitted model used to predict wavelengths
+    - converged (bool): Indicates whether the iterative sigma clipping process converged before reaching max_iter.
     """
     
     # Prepare data
@@ -1248,9 +1487,35 @@ def fit_surface_sklearn(dispersion_position, orders_position, wave_array, extrac
     return Z, residuals, mask, model, converged
 
 def get_wave_solution_from_surface(model, traces, ORDER):
+    """
+    For each order use model to predict wavelengths.
+
+    Parameters:
+    - model (sklearn estimator): The fitted model used to predict wavelengths.
+    - traces (object): A trace object.
+    - ORDER (list or numpy.ndarray): List of absolute order numbers.
+
+    Returns:
+    - wave_solution (list of numpy.ndarray): List of wavelength solutions for each order.
+    """
     return [model.predict((np.column_stack([trace_y, np.ones_like(trace_y)*absolute_order])))/absolute_order for absolute_order, trace_y in zip(ORDER, traces.y)]
 
 def get_arcTh_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, filename=None):
+    """
+    Load or compute the master ThAr image for the given arm and date.
+
+    Parameters:
+    - veloce_paths: An object containing paths to the data directories.
+    - arm: The spectrograph arm ('blue', 'green', or 'red').
+    - date: The date of the observations (used to find the relevant files).
+    - amplifier_mode: The amplifier mode used for the observations.
+    - obs_list: Optional. A dictionary containing lists of observation files.
+    - filename: Optional. If provided, the function will load the master ThAr image from this file instead of computing it.
+    
+    Returns:
+    - arcTh_image: The master ThAr image as a numpy array.
+    - hdr: The header associated with the master ThAr image.
+    """
     if filename is not None:
         arcTh_master_filename = filename
     else:
@@ -1276,6 +1541,26 @@ def get_arcTh_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, fil
 
 # def calibrate_absolute_Th(extracted_science_orders, obs_list, veloce_paths, traces, thxe_image, hdr, arm, plot=False, filename=None):
 def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_mode, plot=False, plot_filename=None, th_linelist_filename='Default'):
+    """
+    Function to perform full wavelength calibration using ThAr.
+    If a wavelength solution file already exists for the given arm and date, it will be loaded.
+    Otherwise, a new wavelength solution will be computed using Th linelist.
+
+    Parameters:
+    - traces (object): Trace object containing pixel positions for each order.
+    - veloce_paths (object): Object containing paths to data directories.
+    - obs_list (dict): Dictionary containing lists of observation files.
+    - date (str): Date of the observation.
+    - arm (str): Spectrograph arm ('blue', 'green', or 'red').
+    - amplifier_mode (str): Amplifier mode used for the observations.
+    - plot (bool): If True, the diagnostic plots are made.
+    - plot_filename (str or None): If provided, the diagnostic plot will be saved to this file.
+    - th_linelist_filename (str): Filename for the Th linelist to use.
+    By 'Default', the NIST linelist will be loaded.
+
+    Returns:
+    - wave (list of numpy.ndarray): List of wavelength solutions for each order.
+    """
     ### TODO: add header info to wavelength solution file, including params used, save fitted lines to file
     wave_solution_filename = f"arcTh_wave_{arm}_{date}.fits"
     if os.path.exists(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename)):
@@ -1374,6 +1659,21 @@ def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_m
     return wave #, extracted_science_orders
 
 def get_LC_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, filename=None):
+    """
+    Load or compute the master LC image for the given arm and date.
+
+    Parameters:
+    - veloce_paths (object): An object containing paths to the data directories.
+    - arm (str): The spectrograph arm ('blue', 'green', or 'red').
+    - date (str): The date of the observations.
+    - amplifier_mode (int): The amplifier mode used.
+    - obs_list (dict): A list of observation files.
+    - filename (str): The filename of the master LC image.
+
+    Returns:
+    - LC_image: The master LC image as a numpy array.
+    - hdr: The header associated with the master LC image.
+    """
     if filename is not None:
         LC_master_filename = filename
     else:
@@ -1398,10 +1698,37 @@ def get_LC_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, filena
     return LC_image, hdr
 
 def select_lc_lines_in_wave_range(lc_lines, wave):
+    """
+    Selects Laser Comb lines that fall within given wavelength range.
+
+    Parameters:
+    - lc_lines (numpy.ndarray): Array of wavelengths of the Laser Comb lines.
+    - wave (list of numpy.ndarray): List of wavelength solutions for each order.
+
+    Returns:
+    - (numpy.ndarray): Array of wavelengths of the Laser Comb lines that fall within the specified range.
+    """
     wave_min, wave_max = min(wave), max(wave)
     return lc_lines[(lc_lines >= wave_min) & (lc_lines <= wave_max)]
 
 def build_LC_wavelength_solution(traces, veloce_paths, date, arm, amplifier_mode, obs_list, config, plot=False, filename=None):
+    """
+    Builds the new wavelength solution for the Laser Comb.
+
+    Parameters:
+    - traces (Traces): The traces for the Laser Comb.
+    - veloce_paths (object): An object containing paths to the data directories.
+    - date (str): The date of the observations.
+    - arm (str): The spectrograph arm ('blue', 'green', or 'red').
+    - amplifier_mode (int): The amplifier mode used.
+    - obs_list (dict): A list of observation files.
+    - config (dict): The selected configuration.
+    - plot (bool): If True, the diagnostic plots are made.
+
+    Returns:
+    - wave (numpy.ndarray): The wavelength solution.
+    """
+    ### TODO: finish this function, line fitting, surface model, predict waves, save to file, plot diagnostics
     wave_solution_filename = f"LC_wave_{arm}_{date}.fits"
     if os.path.exists(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename)):
         print(f"Reading existing wavelength solution file {wave_solution_filename}")

@@ -18,7 +18,20 @@ arm_nums = {'red': 3, 'green': 2, 'blue': 1}
 #     def save(self, filename):
 #         np.savez(filename, wave=self.wave, flux=self.flux, hdr=self.header)
 
-def load_trace_data(arm, trace_path, sim_calib=False, filename=None):
+def load_trace_data(arm, trace_path, sim_calib=False, filename='Default'):
+    """
+    Load trace data for the specified arm and calibration type.
+
+    Parameters:
+    - arm (str): The spectrograph arm ('red', 'green', or 'blue').
+    - trace_path (str): The directory path where trace data files are stored.
+    - sim_calib (bool): Whether to load traces for simultaneous calibration. Default is False.
+    - filename (str, optional): Specific filename to load.
+    If 'Default', it will load the default trace data based on the arm and calibration type.
+    
+    Returns:
+    - traces (object): A trace object.
+    """
     if filename == 'Default':
         if sim_calib:
             filename = os.path.join(trace_path, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
@@ -36,6 +49,21 @@ def load_trace_data(arm, trace_path, sim_calib=False, filename=None):
     return traces
 
 def get_trace_shift(traces, veloce_paths, arm, amplifier_mode, sim_calib, obs_list):
+    """
+    Determine the trace shift by cross-correlating the traces with a template.
+    If a trace shift is detected, adjust the traces accordingly and save the new traces.
+    
+    Parameters:
+    - traces (object): An object containing the trace information.
+    - veloce_paths (VelocePaths): An object with paths for reduction
+    - arm (str): The spectrograph arm ('red', 'green', or 'blue').
+    - amplifier_mode (str): The amplifier mode used for the observations.
+    - sim_calib (bool): Whether simultaneous calibration was used.
+    - obs_list (dict): List of observations.
+
+    Results:
+    - traces (object): The updated trace object.
+    """
     date = list(obs_list['science'].keys())[0] # date of first science observation
     trace_shift_filename =  os.path.join(veloce_paths.trace_shift_dir, f'trace_{arm}_{date}.pkl')
     if os.path.exists(trace_shift_filename):
@@ -72,6 +100,16 @@ def get_trace_shift(traces, veloce_paths, arm, amplifier_mode, sim_calib, obs_li
 def remove_scattered_light(frame, hdr, traces, diagnostic=False):
     """
     Remove scattered light from the image.
+
+    Parameters:
+    - frame (numpy.ndarray): The 2D array - science frame.
+    - hdr (astropy.io.fits.Header): The header.
+    - traces (object): An object containing the trace information.
+    - diagnostic (bool): Whether to generate diagnostic plots. Default is False.
+    
+    Returns:
+    - corrected_frame (numpy.ndarray): The science frame after scattered light correction.
+    - hdr (astropy.io.fits.Header): The updated header.
     """
     background_threshold = 20
     # this models scattered light and subtracts it
@@ -96,6 +134,20 @@ def remove_scattered_light(frame, hdr, traces, diagnostic=False):
     return corrected_frame, hdr
 
 def get_flat(veloce_paths, arm, amplifier_mode, date, obs_list):
+    """
+    Load or compute the master flat field for the specified arm and date.
+    
+    Parameters:
+    - veloce_paths (VelocePaths): An object containing paths to Veloce data directories.
+    - arm (str): The spectrograph arm ('red', 'green', or 'blue').
+    - amplifier_mode (str): The amplifier mode used for the observations.
+    - date (str): The date of the observations for which to get the master flat.
+    - obs_list (dict): List of observations.
+
+    Returns:
+    - master_flat (numpy.ndarray): The master flat field image.
+    - norm_flat (numpy.ndarray): The normalized master flat field image.
+    """
     master_flat_filename = os.path.join(veloce_paths.master_dir, f'master_flat_{arm}_{date}.fits')
     if os.path.exists(master_flat_filename):
         with fits.open(master_flat_filename) as hdul:
