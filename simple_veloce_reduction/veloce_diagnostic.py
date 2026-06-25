@@ -140,7 +140,7 @@ def plot_extracted_2D_order(extracted_order_imgs, order, traces, filename, veloc
     # xtick_labels = np.arange(-lower_range, upper_range + 1, 10)
     
     if flatfielded:
-        _, extracted_orders_flat = veloce_reduction_tools.extract_orders_with_trace(flatfield, traces)
+        _, _, extracted_orders_flat = veloce_reduction_tools.extract_orders_with_trace(flatfield, traces)
         fig, (ax1, ax2) = plt.subplots(1,2)
         im1 = ax1.imshow(extracted_order_imgs[order],
                         extent=[0, lower_range + upper_range, 0, extracted_order_imgs[order].shape[0]],

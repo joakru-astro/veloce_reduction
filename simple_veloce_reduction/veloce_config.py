@@ -1,6 +1,5 @@
 import os
 import yaml
-
 from astropy.io import fits
 import os, re
 
@@ -36,9 +35,18 @@ class VelocePaths:
         self.trace_dir = os.path.join(self.reduction_parent_dir, 'Trace')
         
         if output_dir is not None:
+            self.extracted_spectra_dir = os.path.join(self.output_dir, 'Extracted_spectra')
+            if not os.path.exists(self.extracted_spectra_dir):
+                os.makedirs(self.extracted_spectra_dir)
+            self.merged_spectra_dir = os.path.join(self.output_dir, 'Merged_spectra')
+            if not os.path.exists(self.merged_spectra_dir):
+                os.makedirs(self.merged_spectra_dir)
             self.intermediate_dir = os.path.join(self.output_dir, 'Intermediate_results')
             if not os.path.exists(self.intermediate_dir):
                 os.makedirs(self.intermediate_dir)
+            self.blaze_dir = os.path.join(self.intermediate_dir, 'Blaze')
+            if not os.path.exists(self.blaze_dir):
+                os.makedirs(self.blaze_dir)
             self.master_dir = os.path.join(self.intermediate_dir, 'Master')
             if not os.path.exists(self.master_dir):
                 os.makedirs(self.master_dir)
@@ -70,38 +78,84 @@ class VelocePaths:
         if config['trace_dir'] != 'Default':
             paths.trace_dir = os.path.abspath(os.path.expanduser(config['trace_dir']))
 
-        nondefault_dirs = True
+        nondefault_dirs = True # flag to check if all dirs for intermediate results are non default, if so we can skip creating intermediate dir
+        if config['blaze_dir'] != 'Default':
+            paths.blaze_dir = os.path.abspath(os.path.expanduser(config['blaze_dir']))
+            if not os.listdir(os.path.join(paths.intermediate_dir, 'Blaze')): # remove intermediate dir if empty
+                os.rmdir(os.path.join(paths.intermediate_dir, 'Blaze'))
+            else:
+                print(f"Warning: Default blaze directory {os.path.join(paths.intermediate_dir, 'Blaze')} is not empty.")
+            if not os.path.exists(paths.blaze_dir):
+                os.makedirs(paths.blaze_dir)
+        else:
+            nondefault_dirs = False
         if config['master_dir'] != 'Default':
-            os.rmdir(os.path.join(paths.intermediate_dir, 'Master'))
+            if not os.listdir(os.path.join(paths.intermediate_dir, 'Master')): # remove intermediate dir if empty
+                os.rmdir(os.path.join(paths.intermediate_dir, 'Master'))
+            else:
+                print(f"Warning: Default master directory {os.path.join(paths.intermediate_dir, 'Master')} is not empty.")
             paths.master_dir = os.path.abspath(os.path.expanduser(config['master_dir']))
             if not os.path.exists(paths.master_dir):
                 os.makedirs(paths.master_dir)
         else:
             nondefault_dirs = False
         if config['wavelength_calibration_dir'] != 'Default':
-            os.rmdir(os.path.join(paths.intermediate_dir, 'Wavelength_calibration'))
+            if not os.listdir(os.path.join(paths.intermediate_dir, 'Wavelength_calibration')): # remove intermediate dir if empty
+                os.rmdir(os.path.join(paths.intermediate_dir, 'Wavelength_calibration'))
+            else:
+                print(f"Warning: Default wavelength calibration directory {os.path.join(paths.intermediate_dir, 'Wavelength_calibration')} is not empty.")
             paths.wavelength_calibration_dir = os.path.abspath(os.path.expanduser(config['wavelength_calibration_dir']))
             if not os.path.exists(paths.wavelength_calibration_dir):
                 os.makedirs(paths.wavelength_calibration_dir)
         else:
             nondefault_dirs = False
         if config['trace_shift_dir'] != 'Default':
-            os.rmdir(os.path.join(paths.intermediate_dir, 'Trace_shifts'))
+            if not os.listdir(os.path.join(paths.intermediate_dir, 'Trace_shifts')): # remove intermediate dir if empty
+                os.rmdir(os.path.join(paths.intermediate_dir, 'Trace_shifts'))
+            else:
+                print(f"Warning: Default trace shift directory {os.path.join(paths.intermediate_dir, 'Trace_shifts')} is not empty.")
             paths.trace_shift_dir = os.path.abspath(os.path.expanduser(config['trace_shift_dir']))
             if not os.path.exists(paths.trace_shift_dir):
                 os.makedirs(paths.trace_shift_dir)
         else:
             nondefault_dirs = False
         if config['plot_dir'] != 'Default':
-            os.rmdir(os.path.join(paths.intermediate_dir, 'Plots'))
+            if not os.listdir(os.path.join(paths.intermediate_dir, 'Plots')): # remove intermediate dir if empty
+                os.rmdir(os.path.join(paths.intermediate_dir, 'Plots'))
+            else:
+                print(f"Warning: Default plot directory {os.path.join(paths.intermediate_dir, 'Plots')} is not empty.")
             paths.plot_dir = os.path.abspath(os.path.expanduser(config['plot_dir']))
             if not os.path.exists(paths.plot_dir):
                 os.makedirs(paths.plot_dir)
         else:
             nondefault_dirs = False
+
         if nondefault_dirs:
             # os.rmdir(paths.intermediate_dir)
+            os.rmdir(os.path.join(paths.output_dir, 'Intermediate_results'))
             paths.intermediate_dir = None
+
+        if config['extracted_spectra_dir'] != 'Default':
+            if not os.listdir(os.path.join(paths.output_dir, 'Extracted_spectra')): # remove directory if empty
+                os.rmdir(os.path.join(paths.output_dir, 'Extracted_spectra'))
+            else:
+                print(f"Warning: Default extracted spectra directory {os.path.join(paths.output_dir, 'Extracted_spectra')} is not empty.")
+            paths.extracted_spectra_dir = os.path.abspath(os.path.expanduser(config['extracted_spectra_dir']))
+            if not os.path.exists(paths.extracted_spectra_dir):
+                os.makedirs(paths.extracted_spectra_dir)
+        if config['merged_spectra_dir'] != 'Default':
+            if not os.listdir(os.path.join(paths.output_dir, 'Merged_spectra')): # remove directory if empty
+                os.rmdir(os.path.join(paths.output_dir, 'Merged_spectra'))
+            else:
+                print(f"Warning: Default merged spectra directory {os.path.join(paths.output_dir, 'Merged_spectra')} is not empty.")
+            paths.merged_spectra_dir = os.path.abspath(os.path.expanduser(config['merged_spectra_dir']))
+            if not os.path.exists(paths.merged_spectra_dir):
+                os.makedirs(paths.merged_spectra_dir)
+        elif not config['merge_orders']:
+            if not os.listdir(os.path.join(paths.output_dir, 'Merged_spectra')): # remove directory if not merging and empty
+                os.rmdir(os.path.join(paths.output_dir, 'Merged_spectra'))
+            else:
+                print(f"Warning: Default merged spectra directory {os.path.join(paths.output_dir, 'Merged_spectra')} is not empty.")
 
         return paths
     
@@ -114,6 +168,7 @@ class VelocePaths:
         message += f'Extracted data directory: {self.output_dir}\n'
         message += f'Wave directory: {self.wave_dir}\n'
         message += f'Trace directory: {self.trace_dir}\n'
+        message += f'Blaze directory: {self.blaze_dir}\n'
         return message
     # remove methods below if not needed
     # def __eq__(self, other):
@@ -165,14 +220,28 @@ def validate_config(config):
     # validate options set in config file
     if config['reduce'] not in ['run', 'night', 'file']:
         raise ValueError(f'reduce must be "run", "night" or "file", not {config["reduce"]}')
-    if config['calib_type'] not in ['SimLC', 'SimThXe', 'Interpolate', 'Static', 'arcTh']:
-        raise ValueError(f'calib_type must be "SimLC", "SimThXe", "Interpolate", "arcTh or "Static", not {config["calib_type"]}')
+    if config['calib_type'] not in ['SimLC', 'buildLC', 'SimThXe', 'Interpolate', 'Static', 'arcTh']:
+        raise ValueError(f'calib_type must be "SimLC", "buildLC", "SimThXe", "Interpolate", "arcTh or "Static", not {config["calib_type"]}')
+    # secondary options
+    if not isinstance(config['use_log'], bool):
+        raise ValueError(f'use_log must be True or False, not {config["use_log"]}')
     if config['arm'] not in ['all', 'red', 'green', 'blue']:
         raise ValueError(f'arm must be "all", "red", "green" or "blue", not {config["arm"]}')
     if config['amplifier_mode'] not in [2, 4]:
         raise ValueError(f'amplifier_mode must be 2 or 4, not {config["amplifier_mode"]}')
+    if not isinstance(config['validate_trace'], bool):
+        raise ValueError(f'validate_trace must be True or False, not {config["validate_trace"]}')
     if not isinstance(config['plot_diagnostic'], bool):
         raise ValueError(f'plot_diagnostic must be True or False, not {config["plot_diagnostic"]}')
+    if not isinstance(config['scattered_light'], bool):
+        raise ValueError(f'scattered_light must be True or False, not {config["scattered_light"]}')
+    if not isinstance(config['flat_field'], bool):
+        raise ValueError(f'flat_field must be True or False, not {config["flat_field"]}')
+    if not isinstance(config['estimate_resolution'], bool):
+        raise ValueError(f'estimate_resolution must be True or False, not {config["estimate_resolution"]}')
+    if not isinstance(config['merge_orders'], bool):
+        raise ValueError(f'merge_orders must be True or False, not {config["merge_orders"]}')
+
     # validate targets list
     if config['science_targets'] == 'Default':
         pass
@@ -187,6 +256,7 @@ def validate_config(config):
     else:
         pass
         # raise ValueError('science_targets must be "Default", a list of target names, or a valid path to a target list file.')
+    
     # validate input paths
     if not os.path.exists(os.path.abspath(os.path.expanduser(config['input_dir']))):
         raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["input_dir"]))} does not exist.')
@@ -199,20 +269,33 @@ def validate_config(config):
         raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["wave_dir"]))} does not exist.')
     if config['trace_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['trace_dir']))):
         raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["trace_dir"]))} does not exist.')
-    
+    # if config['blaze_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['blaze_dir']))):
+    #     raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["blaze_dir"]))} does not exist.')
+    # if config['master_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['master_dir']))):
+    #     raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["master_dir"]))} does not exist.')
+    # if config['wavelength_calibration_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['wavelength_calibration_dir']))):
+    #     raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["wavelength_calibration_dir"]))} does not exist.')
+    # if config['trace_shift_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['trace_shift_dir']))):
+    #     raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["trace_shift_dir"]))} does not exist.')
+    # if config['extracted_spectra_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['extracted_spectra_dir']))):
+    #     raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["extracted_spectra_dir"]))} does not exist.')
+    # if config['merged_spectra_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['merged_spectra_dir']))):
+    #     raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["merged_spectra_dir"]))} does not exist.')
+
     return True
 
 def make_config(input_dir, output_dir,
                 wave_dir='Default', trace_dir='Default',
-                master_dir='Default', wavelength_calibration_dir='Default',
+                blaze_dir='Default', master_dir='Default', wavelength_calibration_dir='Default',
                 trace_shift_dir='Default', plot_dir='Default',
+                extracted_spectra_dir='Default', merged_spectra_dir='Default',
                 trace_file='Default',
                 reduce='run', date=None, filename=None,
                 calib_type='arcTh', science_targets='Default',
                 arm='all', amplifier_mode=4,
                 use_log=False, plot_diagnostic=False,
-                validate_trace=True, sim_calib=True,
-                scattered_light=False, flat_field=False):
+                validate_trace=True,
+                scattered_light=False, flat_field=False, estimate_resolution=False, merge_orders=False):
     """
     Create a configuration dictionary for Veloce data reduction.
     
@@ -221,6 +304,7 @@ def make_config(input_dir, output_dir,
     - output_dir (str): Path to the output directory where reduced data will be saved.
     - wave_dir (str, optional): Path to the directory containing wavelength calibration files. Default is 'Default', which uses the internal directory.
     - trace_dir (str, optional): Path to the directory containing trace files. Default is 'Default', which uses the internal directory.
+    - blaze_dir (str, optional): Path to the directory for blaze models. Default is 'Default', which uses the internal directory.
     - master_dir (str, optional): Path to the directory for master calibration files. Default is 'Default', which uses the internal directory.
     - wavelength_calibration_dir (str, optional): Path to the directory for wavelength calibration results. Default is 'Default', which uses the internal directory.
     - trace_shift_dir (str  optional): Path to the directory for trace shift results. Default is 'Default', which uses the internal directory.
@@ -236,10 +320,11 @@ def make_config(input_dir, output_dir,
     - use_log (bool): Whether to use observation logs to determine which files to reduce. If False, the input directory will be scanned directly.
     - plot_diagnostic (bool): Whether to generate diagnostic plots during the reduction process.
     - validate_trace (bool): Whether to validate the trace before extraction.
-    - sim_calib (bool): Whether to perform simulated wavelength calibration.
     - scattered_light (bool): Whether to perform scattered light correction.
     - flat_field (bool): Whether to perform flat field correction.
-    
+    - estimate_resolution (bool): Whether to estimate the spectral resolution during wavelength calibration.
+    - merge_orders (bool): Whether to merge the deblazed orders into a single spectrum.
+
     Returns:
     - config (dict): A dictionary containing the configuration options for Veloce data reduction.
     """
@@ -256,14 +341,18 @@ def make_config(input_dir, output_dir,
         'use_log': use_log,
         'plot_diagnostic': plot_diagnostic,
         'validate_trace': validate_trace,
-        'sim_calib': sim_calib,
         'scattered_light': scattered_light,
         'flat_field': flat_field,
+        'estimate_resolution': estimate_resolution,
+        'merge_orders': merge_orders,
         'wave_dir': wave_dir,
         'trace_dir': trace_dir,
+        'blaze_dir': blaze_dir,
         'master_dir': master_dir,
         'wavelength_calibration_dir': wavelength_calibration_dir,
         'trace_shift_dir': trace_shift_dir,
+        'extracted_spectra_dir': extracted_spectra_dir,
+        'merged_spectra_dir': merged_spectra_dir,
         'plot_dir': plot_dir,
         'trace_file': trace_file
     }

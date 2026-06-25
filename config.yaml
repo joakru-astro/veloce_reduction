@@ -1,30 +1,33 @@
 # primary information for the reduction
-reduce: run # what to reduce options: 'run', 'night', or 'file'; run will reduce all dates in provided directories.
-date: '' # date of the observation (YYMMDD), if 'reduce' is 'night' or 'file'
+reduce: 'night' # what to reduce options: 'run', 'night', or 'file'; run will reduce all dates in provided directories.
+date: '230828' # date of the observation (YYMMDD), if 'reduce' is 'night' or 'file'
 filename: '' # name of the file to reduce, if 'reduce' is 'file'
 science_targets: 'targets.dat' # file containing a list of science targets, 'Default' will use all science frames in the night/run
-calib_type: arcTh # Wavelength calibration to use SimLC, arcTh or Static (not recommended), other possibilieties are not implemented: SimThXe, Interpolate_LC, Interpolate_Th
+calib_type: SimLC # Wavelength calibration to use arcTh, buildLC, SimLC, or Static (not recommended), other possibilieties are not implemented: SimThXe, Interpolate_LC, Interpolate_Th
 # secondary information for the reduction
 use_log: False # True or False, if True the code will use the log files to identify the files
 arm: all # Which arm to reduce 'all', 'red', 'green' or 'blue'
-amplifier_mode: 2 # 2 or 4
+amplifier_mode: 4 # 2 or 4
 validate_trace: True # True or False, if True the code will cross-correlate FibFlat with reference to determine offset of the trace(s)
-sim_calib: True # Flag indicating if the simultaneous calibration was used True or False
 plot_diagnostic: True # True or False
 scattered_light: False # try to remove scattered light (background) True or False
 flat_field: True # these are fiber flats (white light fiber spectrum) used for pixel sensitivity True or False
+estimate_resolution: True # True or False, if True the code will estimate the resolution
+merge_orders: True # True or False, if True the code will merge the deblazed orders into a single spectrum (as an additional product)
 
 # part responsible for the paths
-input_dir: /Users/jjkruger/VeloceData/Delta_Call_2025_accretion # path to the directory with raw data (one in which the run directory is, i.e. input directory)
-output_dir: /Users/jjkruger/Chemically_peculiar_stars_in_GSP-Spec/Veloce_data # path to the directory where extracted data will be stored (i.e. output directory)
+input_dir: /Users/jjkruger/VeloceData/CSV_Run # path to the directory with raw data (one in which the run directory is, i.e. input directory)
+output_dir: /Users/jjkruger/VeloceExtracted/Test # path to the directory where extracted data will be stored (i.e. output directory)
 
 # below are paths where code will store intermediet files and diagnostics
 # by default they are set as subdirectories of output directory with extracted data
-# blaze_dir: Default
+blaze_dir: Default # directory for blaze models for night/run
 master_dir: Default # directory for master images for night/run
 wavelength_calibration_dir: Default # directory for wavelength calibration related files for the night/run
 trace_shift_dir: Default # directory for results of traces shifted to new position
 plot_dir: Default # directory for diagnostic plots
+extracted_spectra_dir: Default # directory for extracted spectra before merging orders
+merged_spectra_dir: Default # directory for merged spectra (if merge_orders is True)
 
 # below are paths where the code will look for internal files
 # leave as default unless you know what you are doing
