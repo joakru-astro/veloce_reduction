@@ -5,10 +5,5 @@
 /docs/
 ispec.log
 check_versions.py
-__pycache__/
-/Master/
 .DS_Store
 .vscode/
-
-# local notebooks
-
