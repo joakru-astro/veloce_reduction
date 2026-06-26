@@ -3,7 +3,7 @@ import pickle
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import median_filter, label, find_objects, zoom
+from scipy.ndimage import median_filter, gaussian_filter, label, find_objects, zoom
 from scipy.interpolate import RBFInterpolator
 from scipy.signal import find_peaks
 from csaps import csaps
@@ -139,7 +139,7 @@ class Traces:
         """
         self.wave_calib_slice = slice(start, stop)
     
-    def save_traces(self, filename=None, trace_dir=None, arm=None, sim_calib=False):
+    def save_traces(self, filename=None, trace_dir=None, arm=None):
         """
         Save the trace data to a specified file.
         
@@ -150,8 +150,6 @@ class Traces:
         If not provided, a default directory is used.
         - arm (str, optional): The arm of the instrument (e.g., 'blue', 'red').
         Used to generate the filename if not provided.
-        - sim_calib (bool, optional): Whether the traces are for simultaneous calibration or not.
-        Default is False. Used to generate the filename if not provided.
         
         Raises:
         - ValueError: If neither `filename` nor both `arm` and `amp_mode` are provided.
@@ -170,10 +168,7 @@ class Traces:
                 filename = f'{filename}.pkl'
             filename = f'{trace_dir}/{filename}'
         elif filename is None and arm is not None:
-            if sim_calib:
-                filename = f'{trace_dir}/veloce_{arm}_sim_calib_trace.pkl'
-            else: 
-                filename = f'{trace_dir}/veloce_{arm}_no_sim_calib_trace.pkl'
+            filename = f'{trace_dir}/veloce_{arm}_trace.pkl'
         else:
             raise ValueError('Please provide a filename or arm and amp_mode.')
         
@@ -260,7 +255,7 @@ class Traces:
         self.x = [trace[1] for trace in _traces]
         self.traces = [np.array([y, x]) for y, x in zip(self.y, self.x)]
 
-    def adjust_traces(self, frame, fit_width=35, max_iterations=100, tolerance=1e-3, mute=True):
+    def adjust_traces(self, frame, fit_width=35, max_iterations=100, tolerance=1e-3, verbose=False):
         """
         Refines the trace positions in a given image (frame) by iteratively fitting a polynomial to the trace positions.
         
@@ -297,11 +292,11 @@ class Traces:
                     else:
                         fit_x.append(np.nan)
                         fit_y.append(np.nan)
-                if not mute: print(f'Iteration {iteration}: adjustment = {np.nanmedian(x_prev - np.array(fit_x))}')
+                if verbose: print(f'Iteration {iteration}: adjustment = {np.nanmedian(x_prev - np.array(fit_x))}')
                 x_current = x_prev + np.nanmedian(np.array(fit_x) - x_prev)
                 # Check for convergence
                 if np.sum(np.abs(x_current - x_prev)) < tolerance:
-                    if not mute: print(f'Converged after {iteration} iterations.')
+                    if verbose: print(f'Converged after {iteration} iterations.')
                     break
                 x_prev = x_current
                 iteration += 1
@@ -345,7 +340,7 @@ class Traces:
                 # shift = fit_ccf_peak(pix_shift, ccf, fitting_limit=7)[0]
                 shift = pix_shift[np.argmax(ccf)]
             else:
-                print(f'[Warrning]: Row {row} has no signal')
+                print(f'[Warning]: Row {row} has no signal')
                 return np.nan, [np.nan], [np.nan]
         
         return shift, pix_shift, ccf
@@ -451,6 +446,18 @@ class Traces:
         return np.array(lower), np.array(upper)
     
     def adjust_traces_with_ccf(self, frame, arm):
+        """
+        Adjusts the trace positions based on the cross-correlation function (CCF) with a reference template.
+        
+        Parameters:
+        - frame (numpy.ndarray): 2D array representing the image frame.
+        - arm (str): The arm of the instrument (e.g., 'blue', 'red') to determine which template to use for cross-correlation.
+
+        Returns:
+        - shift (float): The determined shift in pixels to adjust the traces.
+        - pix_shift (numpy.ndarray): The array of pixel corresponding to the CCF.
+        - ccf (numpy.ndarray): The cross-correlation function values.
+        """
         shift, pix_shift, ccf = self.determine_trace_shift_template(frame, arm=arm)
         if np.isnan(shift):
             print('Could not determine trace shift, not adjusting traces.')
@@ -513,6 +520,10 @@ class Traces:
             summing_ranges_upper=summing_ranges_upper,
             wave_calib_slice=wave_calib_slice
         )
+
+READOUT_NOISE = 2.5  # verify this with header values
+DARK_CURRENT = 0.0  # add measurements for this, but it is expected to be very low
+SKY = 0.0  # add per exposure, per order measurements for this
 
 ### Image processing functions
 def determine_amplifier_mode(hdr):
@@ -593,7 +604,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         q1_overscan_mask[ydiv:,:overscan_range] = 1
         q1_overscan_mask[ylen-overscan_range:,:xdiv] = 1
         q1 -= np.median(frame[q1_overscan_mask == 1])
-        q1[q1 < 0] = 0
+        # q1[q1 < 0] = 0
         q1_gain = gain
         # print(f'Gain for quadrant 1: {q1_gain}')
         q1 /= q1_gain
@@ -608,7 +619,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         q2_overscan_mask[:ydiv,:overscan_range] = 1
         q2_overscan_mask[:overscan_range,:xdiv] = 1
         q2 -= np.median(frame[q2_overscan_mask == 1])
-        q2[q2 < 0] = 0
+        # q2[q2 < 0] = 0
         # q2_gain = float(hdr['DETA1GN'])
         q2_gain = q1_gain * gain_ratio_q2_q1
         # print(f'Gain for quadrant 2: {q2_gain}')
@@ -624,7 +635,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         q3_overscan_mask[:ydiv,xlen-overscan_range:] = 1
         q3_overscan_mask[:overscan_range,xdiv:] = 1
         q3 -= np.median(frame[q3_overscan_mask == 1])
-        q3[q3 < 0] = 0
+        # q3[q3 < 0] = 0
         # q3_gain = float(hdr['DETA3GN'])
         q3_gain = q1_gain * gain_ratio_q4_q1 * gain_ratio_q3_q4
         # print(f'Gain for quadrant 3: {q3_gain}')
@@ -640,7 +651,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         q4_overscan_mask[ydiv:,xlen-overscan_range:] = 1
         q4_overscan_mask[ylen-overscan_range:,xdiv:] = 1
         q4 -= np.median(frame[q4_overscan_mask == 1])
-        q4[q4 < 0] = 0
+        # q4[q4 < 0] = 0
         # q4_gain = float(hdr['DETA4GN'])
         q4_gain = q1_gain * gain_ratio_q4_q1
         # print(f'Gain for quadrant 4: {q4_gain}')
@@ -670,7 +681,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         h1_overscan_mask[:overscan_range,:xdiv] = 1
         h1_overscan_mask[ylen-overscan_range:,:xdiv] = 1
         h1 -= np.median(frame[h1_overscan_mask == 1])
-        h1[h1 < 0] = 0
+        # h1[h1 < 0] = 0
         h1_gain = float(hdr['DETA1GN'])
         # print(f'Gain for half 1: {h1_gain}')
         h1 /= h1_gain
@@ -685,7 +696,7 @@ def remove_overscan_bias(frame, hdr, arm, amplifier_mode, overscan_range=32):
         h2_overscan_mask[ylen-overscan_range:,xdiv:] = 1
         h2_overscan_mask[ylen-overscan_range:,xdiv:] = 1
         h2 -= np.median(frame[h2_overscan_mask == 1])
-        h2[h2 < 0] = 0
+        # h2[h2 < 0] = 0
         # h2_gain = float(hdr['DETA2GN'])
         h2_gain = h1_gain * gain_ratio
         # print(f'Gain for half 2: {h2_gain}')
@@ -901,7 +912,7 @@ def get_orders_masks(binarized):
     orders = np.array(orders, dtype=np.uint16)
     return orders
 
-def fit_background(frame, traces, x_range=5, y_step=20, kernel='thin_plate_spline', smoothing=1, downsample_factor=0.1):
+def fit_background(frame, traces, x_range=3, y_range=3, y_step=20, kernel='thin_plate_spline', smoothing=1, downsample_factor=0.1):
     """
     Fit the background of a given frame using radial basis function (RBF) interpolation.
     
@@ -909,6 +920,7 @@ def fit_background(frame, traces, x_range=5, y_step=20, kernel='thin_plate_splin
     - frame (numpy.ndarray): The 2D array representing the image frame from which the background is to be extracted.
     - traces (object): An object containing the trace information.
     - x_range (int, optional): The range around each trace position to consider for fitting. Default is 5 pixels.
+    - y_range (int, optional): The range around each trace position to consider for fitting. Default is 5 pixels.
     - y_step (int, optional): The step size for sampling the traces. Default is 20.
     - kernel (str, optional): The kernel to use for the RBF interpolation. Default is 'thin_plate_spline'.
     - smoothing (float, optional): The smoothing factor for the RBF interpolation. Default is 1.
@@ -917,16 +929,8 @@ def fit_background(frame, traces, x_range=5, y_step=20, kernel='thin_plate_splin
     Returns:
     - numpy.ndarray: The 2D array representing the fitted background of the same shape as the input frame.
     """
-    # # verify x_range
-    # for i in range(len(traces)-1):
-    #     if np.any((traces.x[i][::y_step]+traces.x[i+1][::y_step])/2+x_range>traces.x[i+1]-traces.summing_ranges_lower) or np.any((traces.x[i][::y_step]+traces.x[i+1][::y_step])/2-x_range>traces.x[i]+traces.summing_ranges_upper):
-    #        raise ValueError(f'x_range = {x_range} is too large for the given traces.')
-    # # verify y_step
-    # if frame.shape[0]/y_step < 100:
-    #     raise ValueError(f'y_step = {y_step} is too big for the frame resulting grid is too sparse.')
-    
     # Extract the background values and coordinates
-    background_values = [[np.nanmedian(frame[int(y), int((x1+x2)/2-x_range):int((x1+x2)/2+x_range)]) for y, x1, x2 in zip(traces.y[i][::y_step], traces.x[i][::y_step], traces.x[i+1][::y_step])] for i in range(len(traces)-1)]
+    background_values = [ [ np.nanmedian(frame[int(y-y_range):int(y+y_range), int((x1+x2)/2-x_range):int((x1+x2)/2+x_range)]) if len(frame[int(y-y_range):int(y+y_range), int((x1+x2)/2-x_range):int((x1+x2)/2+x_range)])!=0 or np.any(np.isnan(frame[int(y-y_range):int(y+y_range), int((x1+x2)/2-x_range):int((x1+x2)/2+x_range)])) else 0 for y, x1, x2 in zip(traces.y[i][::y_step], traces.x[i][::y_step], traces.x[i+1][::y_step])] for i in range(len(traces)-1)]
     background_values = np.hstack(background_values)
     background_points = [[(y, (x1+x2)/2) for y, x1, x2 in zip(traces.y[i][::y_step], traces.x[i][::y_step], traces.x[i+1][::y_step])] for i in range(len(traces)-1)]
     background_points = np.vstack(background_points)
@@ -947,7 +951,11 @@ def fit_background(frame, traces, x_range=5, y_step=20, kernel='thin_plate_splin
     background = zoom(downsampled_background, (grid_shape[0] / downsampled_shape[0], grid_shape[1] / downsampled_shape[1]), order=1)
     background[background < 0] = 0
 
-    return background    
+    # smooth
+    background = gaussian_filter(background, (300,100))
+    # background = gaussian_filter(background, 100)
+
+    return background     
 
 ### old version
 # def get_orders_masks(binarized):
@@ -1204,6 +1212,7 @@ def extract_orders_with_trace(frame, traces, remove_background=False):
     - tuple: A tuple containing two elements:
         - numpy.ndarray: An array of extracted spectral orders, where each row corresponds to a spectral order
           and columns represent the summed signal across the specified summing range.
+        - numpy.ndarray: An array of uncertainties for each extracted spectral order
         - list of numpy.ndarray: A list of 2D numpy arrays, each representing the extracted image of a spectral
           order before summing. Useful for diagnostics or further processing.
 
@@ -1214,6 +1223,7 @@ def extract_orders_with_trace(frame, traces, remove_background=False):
       background estimation does not interfere with the spectral signal.
     """
     extracted_orders = []
+    uncertainties = []
     extracted_order_imgs = []
     ylen, xlen = frame.shape
     # y = np.arange(ylen)
@@ -1257,6 +1267,9 @@ def extract_orders_with_trace(frame, traces, remove_background=False):
         if remove_background: extracted_order_img = remove_order_background(extracted_order_img, n_pix=remove_background)
         extracted_order_imgs.append(extracted_order_img)
         extracted_orders.append(np.sum(extracted_order_img, axis=1)) # purposfully propagating nans to drop incomplete rows
+        # TODO: Add dark and sky background to uncertainty calculation - globals set to 0 for now
+        # uncertainties based on CCD equation from Handbook of CCD Astronomy, edition 2, (Howell 2006)
+        uncertainties.append(np.sqrt(abs(np.sum(extracted_order_img, axis=1)) + extracted_order_img.shape[1] * (READOUT_NOISE**2)))
         # i+=1
     # extracted_orders = np.array(extracted_orders, dtype=np.float64)
     # padding solves shape issue?
@@ -1266,7 +1279,7 @@ def extract_orders_with_trace(frame, traces, remove_background=False):
                                     (0, max_shape[1] - img_array.shape[1])), 
                                     constant_values=np.nan) 
                                     for img_array in extracted_order_imgs])
-    return extracted_orders, extracted_order_imgs
+    return extracted_orders, uncertainties, extracted_order_imgs
 
 def plot_order_cross_section(frame, traces, order, plot_type='median', margin=[10,10]):
     """
@@ -1330,7 +1343,7 @@ def plot_order_cross_section(frame, traces, order, plot_type='median', margin=[1
     else:
         offset = 0
 
-    extracted_order_img = np.array([frame[int(yval), int(np.round(xval-lower_range-lower_margin, 0)+offset):int(np.round(xval+upper_range+upper_margin, 0)+offset)] 
+    extracted_order_img = np.array([frame[int(yval), int(xval-lower_range-lower_margin+offset):int(xval+upper_range+upper_margin+offset)] 
                                             for yval, xval in zip(*traces.traces[order])])
 
     # x = np.arange(-lower_range-lower_margin,upper_range+upper_margin)
@@ -1379,8 +1392,7 @@ def load_prefitted_wavecalib_trace(arm='red', calib_type='Th', trace_path=None, 
   """
 
   if trace_path is None:
-      veloce_paths = veloce_config.VelocePaths(input_dir=os.getcwd(), output_dir=os.getcwd())
-      trace_path = veloce_paths.trace_dir
+      raise ValueError("trace_path must be provided.")
   if filename is not None:
       filename = os.path.join(trace_path, filename)
           
@@ -1571,7 +1583,7 @@ def get_longest_consecutive_files(file_list):
         longest = current[:]
     return longest
 
-def get_master_mmap(file_list, master_type, data_path, date, arm, amp_mode):
+def get_master_mmap(file_list, data_path, date, arm, amp_mode):
     """
     Generates a master frame by median combining individual frames for a given observation type and date using memory-mapped files.
 
@@ -1648,7 +1660,7 @@ def normalise_flat(flat, hdr):
     # with fits.open(os.path.join(master_path, master_filename)) as hdul:
     #     flat_image = hdul[0].data
     #     hdr = hdul[0].header
-    # flat_subtracted_bias = veloce_reduction_tools.remove_overscan_bias(flat_image, hdr, arm=arm, amplifier_mode=amplifier_mode, overscan_range=32)
+    # flat_subtracted_bias = remove_overscan_bias(flat_image, hdr, arm=arm, amplifier_mode=amplifier_mode, overscan_range=32)
 
     y = np.arange(flat.shape[0])
     smoothed_flat = np.array([csaps(y, flat[:, col], y, smooth=0.5) for col in range(flat.shape[1])]).T    
@@ -1659,7 +1671,7 @@ def normalise_flat(flat, hdr):
         normalised_flat[normalised_flat <= 0] = 1
 
     # normalised_flat_name = master_filename.split('.')[0]+'_norm.fits'
-    # veloce_reduction_tools.save_image_fits(normalised_flat_name, master_path, normalised_flat, hdr)
+    # save_image_fits(normalised_flat_name, master_path, normalised_flat, hdr)
     
     ### TODO: modify header to reflect that it is a normalised flat
     
@@ -1684,7 +1696,7 @@ def flat_field_correction(frame, flat, hdr):
     if frame.shape != flat.shape:
         raise ValueError("Frame and flat field image must have the same shape.")
     flat_corrected_image = frame / flat
-    hdr['HISTORY'] = 'Flat-field corrected'
+    # hdr['HISTORY'] = 'Flat-field corrected'
     return flat_corrected_image, hdr
 
 def save_image_fits(filename, image, hdr):
@@ -1714,7 +1726,7 @@ def save_image_fits(filename, image, hdr):
     hdul.writeto(filename, overwrite=True)
     return filename 
 
-def save_extracted_spectrum_fits(filename, wave, flux, hdr):
+def save_extracted_spectrum_fits(filename, wave, flux, hdr, err=None):
     """
     Saves a 2D spectrum array to a FITS file with a specified header.
 
@@ -1730,7 +1742,7 @@ def save_extracted_spectrum_fits(filename, wave, flux, hdr):
     - wave (numpy.ndarray): A 2D numpy array representing the wavelength values of the spectrum.
     - flux (numpy.ndarray): A 2D numpy array representing the flux values of the spectrum.
     - hdr (astropy.io.fits.header.Header): An Astropy header object containing metadata information for the spectrum.
-
+    - err (numpy.ndarray, optional): A 2D numpy array representing the uncertainties in the flux values.
     Returns:
     - str: The full file path to the saved FITS file.
 
@@ -1741,14 +1753,22 @@ def save_extracted_spectrum_fits(filename, wave, flux, hdr):
     if all(len(order) == len(flux[0]) for order in flux):
         hdu_wave = fits.ImageHDU(wave, name='WAVE')
         hdu_flux = fits.ImageHDU(flux, name='FLUX')
+        if err is not None:
+            hdu_err = fits.ImageHDU(err, name='ERR')
     else:
         max_length = max([len(order) for order in wave])
         wave_padded = np.array([np.pad(order, (0, max_length - len(order)), constant_values=np.nan) for order in wave])
         flux_padded = np.array([np.pad(order, (0, max_length - len(order)), constant_values=np.nan) for order in flux])
         hdu_wave = fits.ImageHDU(wave_padded, name='WAVE')
         hdu_flux = fits.ImageHDU(flux_padded, name='FLUX')
+        if err is not None:
+            err_padded = np.array([np.pad(order, (0, max_length - len(order)), constant_values=np.nan) for order in err])
+            hdu_err = fits.ImageHDU(err_padded, name='ERR')
     
-    hdul = fits.HDUList([fits.PrimaryHDU(), hdu_wave, hdu_flux])
+    if err is not None:
+        hdul = fits.HDUList([fits.PrimaryHDU(), hdu_wave, hdu_flux, hdu_err])
+    else:
+        hdul = fits.HDUList([fits.PrimaryHDU(), hdu_wave, hdu_flux])
     # hdr['NAXIS1'] = wave.shape[1]
     # hdr['NAXIS2'] = wave.shape[0]
     # hdr['NAXIS3'] = 2
@@ -1786,7 +1806,163 @@ def load_extracted_spectrum_fits(filename):
         wave = hdul['WAVE'].data
         flux = hdul['FLUX'].data
         hdr = hdul[0].header
-    return wave, flux, hdr
+        try:
+            err = hdul['ERR'].data
+        except KeyError:
+            err = None
+    if err is not None:
+        return wave, flux, err, hdr
+    else:
+        return wave, flux, hdr
+
+### Move functions to here
+def load_trace_data(arm, trace_path, sim_calib=True, filename='Default'):
+    """
+    Load trace data for the specified arm and calibration type.
+
+    Parameters:
+    - arm (str): The spectrograph arm ('red', 'green', or 'blue').
+    - trace_path (str): The directory path where trace data files are stored.
+    - sim_calib (bool): Whether to load traces assuming simultaneous calibration is performed.
+    Default is True, as extending the summing range to cover sky fibres and dealing with them was not practical.
+    - filename (str, optional): Specific filename to load.
+    If 'Default', it will load the default trace data based on the arm and calibration type.
+    
+    Returns:
+    - traces (object): A trace object.
+    """
+    if filename == 'Default':
+        if sim_calib:
+            filename = os.path.join(trace_path, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
+        else:
+            filename = os.path.join(trace_path, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
+    else:
+        if arm.lower() not in filename.lower():
+            # only checks the filename at this stage
+            raise ValueError(f"Trace data filename '{filename}' does not match selected arm '{arm}'.")
+        if not os.path.abspath(filename):
+            # if not absolute path, assume it is relative to trace_path
+            # filename = os.path.join(trace_path, filename)
+            filename = os.path.join(trace_path, filename)
+    traces = Traces.load_traces(filename)
+    return traces
+
+def get_trace_shift(traces, veloce_paths, arm, amplifier_mode, obs_list):
+    """
+    Determine the trace shift by cross-correlating the traces with a template.
+    If a trace shift is detected, adjust the traces accordingly and save the new traces.
+    
+    Parameters:
+    - traces (object): An object containing the trace information.
+    - veloce_paths (VelocePaths): An object with paths for reduction
+    - arm (str): The spectrograph arm ('red', 'green', or 'blue').
+    - amplifier_mode (str): The amplifier mode used for the observations.
+    - obs_list (dict): List of observations.
+
+    Results:
+    - traces (object): The updated trace object.
+    """
+    date = list(obs_list['science'].keys())[0] # date of first science observation
+    trace_shift_filename =  os.path.join(veloce_paths.trace_shift_dir, f'trace_{arm}_{date}.pkl')
+    if os.path.exists(trace_shift_filename):
+        print(f'[Info]: Loading existing traces with determined shift {trace_shift_filename}')
+        traces = Traces.load_traces(trace_shift_filename)
+    else:
+        master_flat_filename = os.path.join(veloce_paths.master_dir, f'master_flat_{arm}_{date}.fits')
+        if os.path.exists(master_flat_filename):
+            with fits.open(master_flat_filename) as hdul:
+                master_flat = hdul[0].data
+                hdr = hdul[0].header
+        else:
+            file_list = obs_list[f'flat_{arm}'][date]
+            file_list = get_longest_consecutive_files(file_list)
+            master_flat, hdr = get_master_mmap(
+                file_list, veloce_paths.input_dir,
+                date, arm, amplifier_mode)
+            save_image_fits(master_flat_filename, master_flat, hdr)
+    
+        shift, pix_shift, ccf = traces.determine_trace_shift_template(master_flat, arm=arm)
+        if np.isnan(shift):
+            print('[Warning]: Could not determine trace shift, not adjusting traces.')
+        elif shift == 0:
+            print('[Info]: No trace shift detected, not adjusting traces.')
+            traces.save_traces(filename=f'trace_{arm}_{date}.pkl', trace_dir=veloce_paths.trace_shift_dir, arm=arm)
+        else:
+            print(f'[Info]: Adjusting traces by {shift} pixels.')
+            traces.x = [np.array(x) + shift for x in traces.x]
+            traces.traces = [np.array([y, x]) for y, x in zip(traces.y, traces.x)]
+            traces.save_traces(filename=f'trace_{arm}_{date}.pkl', trace_dir=veloce_paths.trace_shift_dir, arm=arm)
+        
+    return traces
+
+def remove_scattered_light(frame, hdr, traces, diagnostic=False):
+    """
+    Remove scattered light from the image.
+
+    Parameters:
+    - frame (numpy.ndarray): The 2D array - science frame.
+    - hdr (astropy.io.fits.Header): The header.
+    - traces (object): An object containing the trace information.
+    - diagnostic (bool): Whether to generate diagnostic plots. Default is False.
+    
+    Returns:
+    - corrected_frame (numpy.ndarray): The science frame after scattered light correction.
+    - hdr (astropy.io.fits.Header): The updated header.
+    """
+    background_threshold = 20
+    # this models scattered light and subtracts it
+    background = fit_background(frame, traces)
+    # head = f'scattered light corrected\n---\nBackground statistics:\n---'
+    # median_str = f'median = {np.median(background)}'
+    # max_str = f'max = {np.max(background)}'
+    # std_str = f'stdev = {np.std(background)}'
+    # print('\n'.join([head, median_str, max_str, std_str]))
+    corrected_frame = frame.copy()
+    corrected_frame -= background
+    corrected_frame[corrected_frame < 0] = 0
+    
+    # if diagnostic:
+    #     veloce_diagnostic.plotted_scattered_light(frame, background, corrected_frame, traces)
+    
+    ### TODO: add note to reduction log
+    hdr['HISTORY'] = 'Scattered light corrected'
+    if np.max(background) < background_threshold:
+        print(f'[Warning] Scattered light correction: background level is below {background_threshold} ADU')
+
+    return corrected_frame, hdr, background
+
+def get_flat(veloce_paths, arm, amplifier_mode, date, obs_list):
+    """
+    Load or compute the master flat field for the specified arm and date.
+    
+    Parameters:
+    - veloce_paths (VelocePaths): An object containing paths to Veloce data directories.
+    - arm (str): The spectrograph arm ('red', 'green', or 'blue').
+    - amplifier_mode (str): The amplifier mode used for the observations.
+    - date (str): The date of the observations for which to get the master flat.
+    - obs_list (dict): List of observations.
+
+    Returns:
+    - master_flat (numpy.ndarray): The master flat field image.
+    - norm_flat (numpy.ndarray): The normalized master flat field image.
+    """
+    master_flat_filename = os.path.join(veloce_paths.master_dir, f'master_flat_{arm}_{date}.fits')
+    if os.path.exists(master_flat_filename):
+        with fits.open(master_flat_filename) as hdul:
+            master_flat = hdul[0].data
+            hdr = hdul[0].header
+        norm_flat, hdr = normalise_flat(master_flat, hdr)
+    else:
+        file_list = obs_list[f'flat_{arm}'][date]
+        file_list = get_longest_consecutive_files(file_list)
+        master_flat, hdr = get_master_mmap(
+            file_list, veloce_paths.input_dir,
+            date, arm, amplifier_mode)
+        norm_flat, hdr = normalise_flat(master_flat, hdr)
+        save_image_fits(master_flat_filename, master_flat, hdr)
+
+    return master_flat, norm_flat
+
 
 if __name__ == '__main__':
     pass

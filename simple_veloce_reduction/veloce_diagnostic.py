@@ -118,6 +118,21 @@ def plot_order_cross_section(frame, traces, order, filename, veloce_paths, plot_
     return output_file
 
 def plot_extracted_2D_order(extracted_order_imgs, order, traces, filename, veloce_paths, flatfielded=False, flatfield=None, show=False):
+    """
+    Plots the 2D image of an extracted spectral order.
+    
+    Parameters:
+    - extracted_order_imgs (list of numpy.ndarray): A list of 2D numpy arrays representing the extracted pixels of each order.
+    - order (int): The index of the order to plot.
+    - traces (object): An object containing trace information.
+    - filename (str): The name of the file being processed, used for naming the output plot.
+    - veloce_paths (object): An object containing paths for saving plots.
+    - flatfielded (bool, optional): Whether the order has been flat-fielded. Default is False.
+    - flatfield (numpy.ndarray, optional): The flat-field image, required if flatfielded is True.
+    - show (bool, optional): Whether to display the plot after saving. Default is False.
+    
+     Returns:
+    - output_file (str): The path to the saved plot image."""
     lower_range, upper_range = float(traces.summing_ranges_lower[order]), float(traces.summing_ranges_upper[order])
     
     xticks = np.arange(lower_range % 10, lower_range + upper_range + 1, 10)
@@ -125,7 +140,7 @@ def plot_extracted_2D_order(extracted_order_imgs, order, traces, filename, veloc
     # xtick_labels = np.arange(-lower_range, upper_range + 1, 10)
     
     if flatfielded:
-        _, extracted_orders_flat = veloce_reduction_tools.extract_orders_with_trace(flatfield, traces)
+        _, _, extracted_orders_flat = veloce_reduction_tools.extract_orders_with_trace(flatfield, traces)
         fig, (ax1, ax2) = plt.subplots(1,2)
         im1 = ax1.imshow(extracted_order_imgs[order],
                         extent=[0, lower_range + upper_range, 0, extracted_order_imgs[order].shape[0]],
@@ -171,6 +186,21 @@ def plot_extracted_2D_order(extracted_order_imgs, order, traces, filename, veloc
     return output_file
 
 def plot_scattered_light(frame, background, corrected_frame, veloce_paths, filename=None, show=False):
+    """
+    Plots the original image, the fitted background, and the corrected image after scattered light removal.
+    
+    Parameters:
+    - frame (numpy.ndarray): The original 2D image frame.
+    - background (numpy.ndarray): The fitted background image.
+    - corrected_frame (numpy.ndarray): The image after subtracting the fitted background from the original frame.
+    - veloce_paths (object): An object containing paths for saving plots.
+    - filename (str, optional): The name of the file being processed, used for naming the output plot. If None, the plot will not be saved.
+    - show (bool, optional): Whether to display the plot after saving. Default is False.
+    
+    Returns:
+    - background_message (str): A string containing statistics about the fitted background.
+    - output_file (str or None): The path to the saved plot image, or None if the plot was not saved.
+    """
     ### TODO add statistics inside trace
     head = 'Background statistics:\n---'
     median_str = f'median = {np.median(background)}'
@@ -208,6 +238,23 @@ def plot_scattered_light(frame, background, corrected_frame, veloce_paths, filen
     return background_message, output_file
 
 def plot_ccf(PIX, CCF, order, chunk, fit_lc_peak, general_gaussian, veloce_paths=None, filename=None, show=False):
+    """
+    Plots the cross-correlation function (CCF) for a given order and chunk, along with a Gaussian fit to the CCF peak.
+    
+    Parameters:
+    - PIX (list of numpy.ndarray): A list of 1D numpy arrays containing the pixel shifts for each order and chunk.
+    - CCF (list of numpy.ndarray): A list of 1D numpy arrays containing the cross-correlation function values for each order and chunk.
+    - order (int): The index of the order to plot.
+    - chunk (int): The index of the chunk to plot.
+    - fit_lc_peak (function): A function that takes pixel shifts and CCF values and returns the fitted peak position, fit parameters, and fitting limit.
+    - general_gaussian (function): A function that takes pixel values and fit parameters and returns the Gaussian fit values.
+    - veloce_paths (object, optional): An object containing paths for saving plots. Default is None.
+    - filename (str, optional): The name of the file to save the plot as. Default is None.
+    - show (bool): Whether to display the plot. Default is False.
+    
+    Returns:
+    - output_file (str or None): The path to the saved plot image, or None if the plot was not saved.
+    """
     # fitting_limit = np.ceil(np.mean(np.diff(find_peaks(CCF[order-1][chunk])[0])))/2 + 1
     shift, popt, fit_lim = fit_lc_peak(PIX[order-1][chunk], CCF[order-1][chunk])
     plt.figure(figsize=(10, 6))
@@ -245,7 +292,30 @@ def plot_ccf(PIX, CCF, order, chunk, fit_lc_peak, general_gaussian, veloce_paths
 
 def plot_offset_map(dispersion_position, orders_position, offset_array, veloce_paths=None, filename=None, show=False):
     """
-    Plot the offset map in 3D.
+    This function creates a 3D scatter plot visualization of offset values across
+    dispersion positions and spectral orders. The scatter points are colored 
+    according to their offset values using the viridis colormap.
+
+    Parameters:
+    - dispersion_position (numpy.ndarray):
+        2D array of dispersion position coordinates for each point.
+    - orders_position (numpy.ndarray):
+        2D array of spectral order positions for each point.
+    - offset_array (numpy.ndarray) :
+        2D array of offset values corresponding to each (dispersion_position, orders_position) pair.
+    veloce_paths (object, optional):
+        Object containing path information, specifically the 'plot_dir' attribute
+        for output file directory. Required if filename is provided. Default is None.
+    filename (str, optional):
+        Base filename (without extension) for saving the plot. If provided, the plot
+        will be saved as 'LC_offset_map_{filename}.png' in veloce_paths.plot_dir.
+        Default is None.
+    show (bool, optional):
+        If True, displays the plot using plt.show(). If False, closes the plot
+        without displaying. Default is False.
+
+    Returns:
+    - output_file (str or None): The full path to the saved plot file if filename is provided, otherwise None.
     """    
     fig = plt.figure(figsize=(8, 8))
     ax = fig.add_subplot(111, projection='3d')
@@ -272,7 +342,19 @@ def plot_offset_map(dispersion_position, orders_position, offset_array, veloce_p
 
 def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, veloce_paths=None, filename=None, show=False):
     """
-    Plot the offset map in 3D.
+    Plot fitted surface to the offsets.
+
+    Parameters:
+    - ref_orders (numpy.ndarray): 1D array of reference order numbers.
+    - extracted_pixels (list of numpy.ndarray): List of 1D arrays containing the pixel positions for each order.
+    - surface_points (numpy.ndarray): 2D array of fitted surface points corresponding to the reference orders and pixel positions.
+    - filtered_points (numpy.ndarray): 2D array of filtered points used for fitting, with columns [pixel_position, order_position, offset_value].
+    - veloce_paths (object, optional): Object containing path information, specifically the 'plot_dir' attribute for output file directory. Required if filename is provided. Default is None.
+    - filename (str, optional): Base filename (without extension) for saving the plot. If provided, the plot will be saved as 'LC_fitted_surface_{filename}.png' in veloce_paths.plot_dir. Default is None.
+    - show (bool, optional): If True, displays the plot using plt.show(). If False, closes the plot without displaying. Default is False.
+    
+    Returns:
+    - output_file (str or None): The full path to the saved plot file if filename is provided, otherwise None.
     """
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
@@ -281,7 +363,7 @@ def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, 
     X, Y = np.meshgrid(np.arange(min_pixel, max_pixel, 1), ref_orders)
     surf = ax.plot_surface(X, Y, surface_points, vmin=np.min(filtered_points[:,2]), vmax=np.max(filtered_points[:,2]), cmap='viridis', edgecolor='none', alpha=0.5)
     points = ax.scatter(filtered_points[:,0], filtered_points[:,1], filtered_points[:,2], c=filtered_points[:,2], cmap='viridis', marker='o')
-    ax.set_title('Offset Map')
+    # ax.set_title('Offset Map')
     ax.set_xlabel('Echelle Dispersion Position')
     ax.set_ylabel('Orders')
     ax.set_zlabel('Offset')
@@ -302,6 +384,20 @@ def plot_surface(ref_orders, extracted_pixels, surface_points, filtered_points, 
     return output_file
 
 def plot_ArcTh_points_positions(pixel_positions, order_positions, mask, veloce_paths, filename=None, show=False):
+    """
+    Plots the positions of the ArcTh lines used for fitting the wavelength solution.
+    
+    Parameters:
+    - pixel_positions (numpy.ndarray): 1D array of pixel positions of the ArcTh lines.
+    - order_positions (numpy.ndarray): 1D array of order positions corresponding to the ArcTh lines.
+    - mask (numpy.ndarray): Boolean array indicating which ArcTh lines were used for fitting (True) and which were rejected (False).
+    - veloce_paths (object): An object containing paths for saving plots.
+    - filename (str, optional): The name of the file being processed, used for naming the output plot. If None, the plot will not be saved.
+    - show (bool, optional): Whether to display the plot after saving. Default is False.
+    
+    Returns:
+    - output_file (str or None): The path to the saved plot image, or None if the plot was not saved.
+    """
     plt.close('all')
 
     fig, ax = plt.subplots()
@@ -351,6 +447,22 @@ def plot_ArcTh_points_positions(pixel_positions, order_positions, mask, veloce_p
     return output_file
 
 def plot_ArcTh_surface(Z, pixel_positions, order_positions, wave_positions, full_pixels, veloce_paths, filename=None, show=False):
+    """
+    Plots the fitted surface to the Th line positions in 3D space.
+    
+    Parameters:
+    - Z (numpy.ndarray): 2D array representing the fitted surface values corresponding to the grid defined by full_pixels and unique order_positions.
+    - pixel_positions (numpy.ndarray): 1D array of pixel positions of the ArcTh lines used for fitting.
+    - order_positions (numpy.ndarray): 1D array of order positions corresponding to the ArcTh lines used for fitting.
+    - wave_positions (numpy.ndarray): 1D array of wavelength positions corresponding to the ArcTh lines used for fitting.
+    - full_pixels (numpy.ndarray): 1D array of pixel positions covering the full range of the fitted surface.
+    - veloce_paths (object): An object containing paths for saving plots.
+    - filename (str, optional): The name of the file being processed, used for naming the output plot. If None, the plot will not be saved.
+    - show (bool, optional): Whether to display the plot after saving. Default is False.
+    
+    Returns:
+    - output_file (str or None): The path to the saved plot image, or None if the plot was not saved.
+    """
     plt.close('all')
 
     fig = plt.figure(figsize=(10, 7))
@@ -383,6 +495,23 @@ def plot_ArcTh_surface(Z, pixel_positions, order_positions, wave_positions, full
     return output_file
 
 def plot_ArcTh_residuals(residuals, order_positions, pixel_positions, wave_positions, mask, veloce_paths, filename=None, plot_type='velocity', show=False):
+    """
+    Plots the residuals of the ArcTh line positions after fitting the wavelength solution, as a function of pixel position and order number.
+    
+    Parameters:
+    - residuals (numpy.ndarray): 1D array of residual values for each ArcTh line used for fitting.
+    - order_positions (numpy.ndarray): 1D array of order positions corresponding to the ArcTh lines used for fitting.
+    - pixel_positions (numpy.ndarray): 1D array of pixel positions of the ArcTh lines used for fitting.
+    - wave_positions (numpy.ndarray): 1D array of wavelength positions corresponding to the ArcTh lines used for fitting.
+    - mask (numpy.ndarray): Boolean array indicating which ArcTh lines were used for fitting (True) and which were rejected (False).
+    - veloce_paths (object): An object containing paths for saving plots.
+    - filename (str, optional): The name of the file being processed, used for naming the output plot. If None, the plot will not be saved.
+    - plot_type (str, optional): The type of residuals to plot. Can be 'velocity' for velocity residuals or 'wavelength' for wavelength residuals. Default is 'velocity'.
+    - show (bool, optional): Whether to display the plot after saving. Default is False.
+    
+    Returns:
+    - output_file (str or None): The path to the saved plot image, or None if the plot was not saved.
+    """
     per_order_residual_mean = []
     for order in np.unique(order_positions):
         in_order_mask = (order_positions == order)

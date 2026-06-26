@@ -3,6 +3,8 @@ from astropy.constants import c
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
+
 import pickle
 
 from scipy import signal
@@ -14,10 +16,12 @@ from scipy.interpolate import make_interp_spline
 from scipy.signal import find_peaks
 # from csaps import csaps
 
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import Ridge
-from sklearn.pipeline import make_pipeline
-from sklearn.linear_model import RANSACRegressor
+from sklearn.linear_model import Ridge, RANSACRegressor
+from sklearn.pipeline import make_pipeline, Pipeline
+from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
+from sklearn.utils import check_array
 
 import warnings
 from scipy.linalg import LinAlgWarning
@@ -27,10 +31,18 @@ from . import veloce_reduction_tools, veloce_diagnostic
 arm_nums = {'red': 3, 'green': 2, 'blue': 1}
 REPETITION_RATE = 25e9  # Hz
 OFFSET_FREQUENCY = 9.56e9  # Hz
+SPEED_OF_LIGHT = c.value  # m/s
 
 def pad_array(array, ref_pixel):
     """
     Pad an array to create 2D array with the size matching min and max of reference pixels.
+
+    Parameters:
+    - array (list of numpy.ndarray): The list of 1D arrays to be padded.
+    - ref_pixel (list of numpy.ndarray): The list of reference pixel arrays.
+
+    Returns:
+    - padded_array (numpy.ndarray): The 2D array after padding.
     """
     lower_bound = min([np.nanmin(order) for order in ref_pixel])
     upper_bound = max([np.nanmax(order) for order in ref_pixel])
@@ -41,19 +53,34 @@ def pad_array(array, ref_pixel):
 
     return padded_array
 
-def load_LC_wave_reference(veloce_paths, arm):
+def load_LC_wave_reference(veloce_paths, arm, wave_calib_file=None):
     """
     Load the wavelength calibration for the LC.
+
+    Parameters:
+    - veloce_paths (object): An object containing the paths to the data directories.
+    - arm (str): The arm of the spectrograph ('red', 'green', or 'blue').
+
+    Returns:
+    - ref_orders (numpy.ndarray): The array of reference orders.
+    - ref_wave (list of numpy.ndarray): The list of reference wavelengths.
+    - ref_intensity (list of numpy.ndarray): The list of reference intensities.
+    - ref_pixel (list of numpy.ndarray): The list of reference pixels.
     """
-    lc_wave_calib_file = os.path.join(veloce_paths.wave_dir, f'{arm.upper()}_LC_SPEC-26aug{arm_nums[arm]}0083.txt')
+    if wave_calib_file is None:
+        lc_wave_calib_file = os.path.join(veloce_paths.wave_dir, f'{arm.upper()}_LC_SPEC-26aug{arm_nums[arm]}0083.txt')
+    else:
+        lc_wave_calib_file = wave_calib_file
 
     if not os.path.exists(lc_wave_calib_file):
         raise FileNotFoundError(f"LC wave calibration file not found: {lc_wave_calib_file}")
     
-    dtype=[('wave', float), ('flux', float), ('pixel', float), ('order', int)]
+    dtype=[('wave', float), ('flux', float), ('pixel', float), ('order', float)]
     lc_wave_calib = np.loadtxt(lc_wave_calib_file, dtype=dtype)
     # remove NaN values
     lc_wave_calib = np.array([v for v in lc_wave_calib if v == v], dtype=dtype)
+    dtype=[('wave', float), ('flux', float), ('pixel', float), ('order', int)]
+    lc_wave_calib = np.array([(v['wave'], v['flux'], v['pixel'], int(v['order'])) for v in lc_wave_calib], dtype=dtype)
 
     ref_orders = np.unique(lc_wave_calib['order'])
     ref_wave = [lc_wave_calib[lc_wave_calib['order'] == order]['wave'] for order in ref_orders]
@@ -68,13 +95,29 @@ def load_LC_wave_reference(veloce_paths, arm):
 def load_simultanous_LC(image, veloce_paths, hdr, arm, traces=None, ref_orders=None, ref_pixel=None):
     """
     Load simultaneous laser comb observations.
+
+    Parameters:
+    - image (numpy.ndarray): Image (2D array) containing the simultaneous laser comb data.
+    - veloce_paths (object): An object containing the paths to the data directories.
+    - hdr (astropy.io.fits.Header): The header.
+    - arm (str): The arm of the spectrograph ('red', 'green', or 'blue').
+    - traces (object, optional): An object containing traces for LC.
+    If None, default traces for the arm will be loaded.
+    - ref_orders (numpy.ndarray, optional): The array of reference orders.
+    - ref_pixel (list of numpy.ndarray, optional): The list of reference pixel arrays.
+
+    Returns:
+    - extracted_LC (list of numpy.ndarray): The list of extracted laser comb orders.
+    - extracted_pixel (list of numpy.ndarray): The list of extracted pixel arrays.
+    - order_slice (slice): The slice for selecting the relevant orders.
+    - pixel_slices (numpy.ndarray): The array of slices for selecting the relevant pixels.
     """
     if hdr is not None and (hdr['FREQREF'] != REPETITION_RATE and hdr['FOFFFREQ'] != OFFSET_FREQUENCY):
         raise ValueError("Repetition rate and offset frequency do not match the values of LC solution.")
     if traces is None:
         traces = veloce_reduction_tools.Traces.load_traces(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_LC_trace.pkl'))
     
-    extracted_LC, extracted_LC_imgs = veloce_reduction_tools.extract_orders_with_trace(image, traces)
+    extracted_LC, extracted_LC_uncertainty, extracted_LC_imgs = veloce_reduction_tools.extract_orders_with_trace(image, traces)
 
     # extracted_pixel = list(range(len(extracted_LC)))
     if ref_orders is not None:
@@ -117,9 +160,52 @@ def load_simultanous_LC(image, veloce_paths, hdr, arm, traces=None, ref_orders=N
 #     return pix_shift, np.array(ccf)
 
 def general_gaussian(x, A, mu, sigma, beta, baseline):
+    """
+    Generalized Gaussian function.
+    
+    Parameters:
+    - x (numpy.ndarray): The independent variable (e.g., pixels).
+    - A (float): Amplitude of the peak.
+    - mu (float): Mean of the peak.
+    - sigma (float): Standard deviation of the peak.
+    - beta (float): Shape parameter of the generalized Gaussian.
+    - baseline (float): Baseline level.
+
+    Returns:
+    - (numpy.ndarray): The values of the generalized Gaussian function at each point in x.
+    """
     return A * np.exp(-np.abs(((x - mu)/(np.sqrt(2)*sigma)))**beta) + baseline
 
+def gaussian(x, A, mu, sigma, baseline):
+    """
+    Gaussian function.
+    
+    Parameters:
+    - x (numpy.ndarray): The independent variable (e.g., pixels).
+    - A (float): Amplitude of the peak.
+    - mu (float): Mean of the peak.
+    - sigma (float): Standard deviation of the peak.
+    - baseline (float): Baseline level.
+
+    Returns:
+    - (numpy.ndarray): The values of the generalized Gaussian function at each point in x.
+    """
+    return A * np.exp(-np.abs(((x - mu)/(np.sqrt(2)*sigma)))**2) + baseline
+
 def fit_lc_peak(pix_shift, ccf, fitting_limit=None):
+    """
+    Fit the peak of the cross-correlation function (CCF) to determine the pixel shift.
+    
+    Parameters:
+    - pix_shift (numpy.ndarray): The pixel axis for the CCF.
+    - ccf (numpy.ndarray): The cross-correlation function values.
+    - fitting_limit (float, optional): How far to look for the peak. If None, it will be calculated automatically.
+
+    Returns:
+    - (float): The fitted pixel shift corresponding to the peak of the CCF.
+    - (list): The fitted parameters of the generalized Gaussian function (A, mu, sigma, beta, baseline).
+    - (float): Fitting limit.
+    """
     ccf_mask = np.isfinite(ccf)
     # if len(pix_shift) == 0 or len(ccf) == 0:
     if np.sum(ccf_mask) < 10:
@@ -162,12 +248,24 @@ def fit_lc_peak(pix_shift, ccf, fitting_limit=None):
                         bounds=([0, np.min(_pix_shift), 1e-3, 1e-3, 0], [2*peak, np.max(_pix_shift), 10, 10, peak]),)
         return popt[1], popt, fitting_limit #fitting_slice
     except Exception as e:
-        print(f"[Warning] LC peak fitting failed: {e}")
+        print(f"[Warning] CCF peak fitting failed: {e}")
         return np.nan, [np.nan], np.nan #slice(0,None)
 
 def calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_pixel, number_of_parts=8, mode='LC', plot=False, veloce_paths=None, filename=None):
     """
     Calculate the cross-correlation function (CCF) for each order of the laser comb.
+
+    Parameters:
+    - ref_orders (numpy.ndarray): The array of reference orders.
+    - ref_intensity (list of numpy.ndarray): The list of reference intensities.
+    - ref_pixel (list of numpy.ndarray): The list of reference pixels.
+    - lc_intensity (list of numpy.ndarray): The list of observed laser comb intensities.
+    - lc_pixel (list of numpy.ndarray): The list of observed laser comb pixels.
+    - number_of_parts (int, optional): The number of parts to split the data into for CCF calculation. Default is 8.
+    - mode (str, optional): The mode for fitting the peak. Default is 'LC'.
+    - plot (bool, optional): Whether to plot the results. Default is False.
+    - veloce_paths (list of str, optional): The paths for the Veloce data. Default is None.
+    - filename (str, optional): The filename for the plot. Default is None.
     """
     CCF = [
         [
@@ -239,6 +337,22 @@ def fit_surface(dispersion_position, orders_position, offset_array, extracted_pi
     Fit a surface to the offset map using least squares.
 
     Fitting procedure inspired by: https://gist.github.com/amroamroamro/1db8d69b4b65e8bc66a6
+
+    Parameters:
+    - dispersion_position (numpy.ndarray): The array of dispersion positions.
+    - orders_position (numpy.ndarray): The array of order positions.
+    - offset_array (numpy.ndarray): The array of offsets.
+    - extracted_pixels (numpy.ndarray): The array of extracted pixel positions for each order to calculate the surface.
+    - degree (int, optional): The degree of the polynomial surface to fit (1 for linear, 2 for quadratic, 3 for cubic). Default is 1.
+    - plot (bool, optional): Whether to plot the fitted surface and residuals. Default is False.
+    - veloce_paths (list of str, optional): The paths for the Veloce data. Default is None.
+    - filename (str, optional): The filename for the plot. Default is None.
+
+    Returns:
+    - Z (numpy.ndarray): The fitted surface values at the extracted pixel positions.
+    - C (numpy.ndarray): The coefficients of the fitted surface.
+    - data (numpy.ndarray): The filtered data points used for fitting.
+    - residuals (numpy.ndarray): The residuals of the fitted surface.
     """
     
     data = np.array([(x, y, z) for x, y, z in zip(dispersion_position.flatten(), orders_position.flatten(), offset_array.flatten())])
@@ -301,6 +415,15 @@ def fit_surface(dispersion_position, orders_position, offset_array, extracted_pi
 def interpolate_offsets_optimised(extracted_pixels, offsets, ref_wave, ref_pixel):
     """
     Interpolate wavelenght using pixel offsets.
+
+    Parameters:
+    - extracted_pixels (numpy.ndarray): The array of extracted pixel positions for each order.
+    - offsets (numpy.ndarray): The array of pixel offsets.
+    - ref_wave (numpy.ndarray): The array of reference wavelengths.
+    - ref_pixel (numpy.ndarray): The array of reference pixel positions.
+
+    Returns:
+    - new_wave (numpy.ndarray): The array of new wavelengths corresponding to the extracted pixel positions after applying the offsets.
     """
     # offset pixels
     new_pixels = extracted_pixels - offsets
@@ -312,8 +435,15 @@ def interpolate_offsets_optimised(extracted_pixels, offsets, ref_wave, ref_pixel
 def estimate_calibration_precision(residuals, order, ref_wave):
     """
     Estimate the calibration precision.
+
+    Parameters:
+    - residuals (numpy.ndarray): The array of residuals from the surface fitting.
+    - order (int): The order for which to estimate the calibration precision.
+    - ref_wave (numpy.ndarray): The array of reference wavelengths.
+
+    Returns:
+    - calibration_precision (float): The estimated calibration precision in m/s.
     """
-    # c = 2.99792458e8  # Speed of light in m/s
     # Calculate the standard deviation of the residuals
     n_points = len(residuals)
     std_dev = np.std(residuals)
@@ -321,14 +451,24 @@ def estimate_calibration_precision(residuals, order, ref_wave):
     average_wave = np.nanmean(ref_wave[order-1])
     
     # Calculate the calibration precision
-    calibration_precision = std_dev / np.sqrt(n_points) * average_step / average_wave * c.value
-    # calibration_precision = std_dev * average_step / average_wave * c.value
+    calibration_precision = std_dev / np.sqrt(n_points) * average_step / average_wave * SPEED_OF_LIGHT
+    # calibration_precision = std_dev * average_step / average_wave * SPEED_OF_LIGHT
 
     print(f"Calibration Precision estimated at {average_wave:.0f}nm: {calibration_precision:.0f} m/s")
     
     return calibration_precision
 
 def apply_wavelength_shift(wave, arm, veloce_paths):
+    """
+    Apply the wavelength shift to the spectrum based on the predetermined velocity offsets for each arm.
+    Parameters:
+    - wave (numpy.ndarray): The array of wavelengths to be shifted.
+    - arm (str): The arm of the spectrograph ('red', 'green', or 'blue').
+    - veloce_paths (object): An object containing the paths to the data directories.
+    
+    Returns:
+    - wave (numpy.ndarray): The array of wavelengths after applying the shift.
+    """
     # Apply the wavelength shift to the spectrum
     shifts = np.load(os.path.join(veloce_paths.wave_dir, f'{arm}_velocity_orders_offsets.npy'))
     if len(wave) != len(shifts):
@@ -336,12 +476,31 @@ def apply_wavelength_shift(wave, arm, veloce_paths):
     for i, v in enumerate(shifts):
         # Calculate the convertion factor
         # v is in km/s, c is in m/s, convert will be in nm
-        convert = 1 - 1000*v / c.value
+        convert = 1 - 1000*v / SPEED_OF_LIGHT
         # Shift the spectrum order
         wave[i] *= convert
     return wave
 
-def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, traces=None, plot=False, filename=None):
+def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, traces=None, plot=False, filename=None, flux_error=None):
+    """
+    Calibrate the wavelength solution for the simultaneous laser comb observations using CCF.
+    
+    Parameters:
+    - extracted_science_orders (list of numpy.ndarray): The list of extracted science orders to be calibrated.
+    - veloce_paths (object): An object containing the paths to the data directories.
+    - lc_image (numpy.ndarray): Image (2D array) containing the simultaneous laser comb data.
+    - hdr (astropy.io.fits.Header): The header of the LC image.
+    - arm (str): The arm of the spectrograph ('red', 'green', or 'blue').
+    - traces (object, optional): An object containing traces for LC. If None, default traces for the arm will be loaded.
+    - plot (bool, optional): Whether to plot the intermediate results. Default is False.
+    - filename (str, optional): The filename for the plots. Default is None.
+    - flux_error (list of numpy.ndarray, optional): The list of flux uncertainties. 
+    
+    Returns:
+    - wave (numpy.ndarray): The array of calibrated wavelengths.
+    - extracted_science_orders (list of numpy.ndarray): The list of extracted science orders trimmed to calibrated range.
+    - flux_error (list of numpy.ndarray, optional): The list of flux uncertainties trimmed to calibrated range. Returned only if flux_error is provided as input.
+    """
     if arm == 'blue':
         raise NotImplementedError("Blue arm is not supported for LC calibration.")
         # print("[warning] Blue arm is not supported for LC calibration.")
@@ -352,6 +511,11 @@ def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, 
     extracted_science_orders = extracted_science_orders[order_slice]
     extracted_science_orders = [order[pixel_slices[i]] for i, order in enumerate(extracted_science_orders)]
     extracted_science_orders = pad_array(extracted_science_orders, ref_pixel)
+
+    if flux_error is not None:
+        flux_error = flux_error[order_slice]
+        flux_error = [error[pixel_slices[i]] for i, error in enumerate(flux_error)]
+        flux_error = pad_array(flux_error, ref_pixel)
 
     # cross-correlate the observed LC pixel positions with the reference LC pixel positions
     dispersion_position, orders_position, offset_array = calculate_offset_map(ref_orders, ref_intensity, ref_pixel, lc_intensity, lc_pixel,
@@ -373,11 +537,17 @@ def calibrate_simLC(extracted_science_orders, veloce_paths, lc_image, hdr, arm, 
 
     # interpolate wavelength solution to pixel positions
     wave = interpolate_offsets_optimised(lc_pixel, surface_points, ref_wave, ref_pixel)
+
+    shifts = np.load(os.path.join(veloce_paths.wave_dir, f'{arm}_velocity_orders_offsets.npy'))
+    shifts = shifts[:len(wave)] # Ensure shifts array matches the length of wave
+    wave = [w * (1 + shift/SPEED_OF_LIGHT) for w, shift in zip(wave, shifts)]
     
     # apply shift between calibration fiber and science fibers expressed as rv
     # wave = apply_wavelength_shift(wave, arm, veloce_paths)
-
-    return wave,  extracted_science_orders
+    if flux_error is not None:
+        return wave, extracted_science_orders, flux_error
+    else:
+        return wave, extracted_science_orders
 
 def load_wave_calibration_for_interpolation():
     raise NotImplementedError
@@ -386,12 +556,31 @@ def interpolate_wave(orders, hdr):
     raise NotImplementedError
 
 def load_static_Th_wavelength_solution(arm, veloce_paths, traces):
+    """
+    Load the static wavelength solution for the ThAr calibration.
+    Parameters:
+    - arm (str): The arm of the spectrograph ('red', 'green', or 'blue').
+    - veloce_paths (object): An object containing the paths to the data directories.
+    - traces (object): A trace object (same as science fibres).
+    Returns:
+    - wave (numpy.ndarray): The array of wavelengths corresponding to the ThAr calibration.
+    """
     wave = pickle.load(open(os.path.join(veloce_paths.wave_dir, f'ThXe_wave_230826_{arm}.pkl'), 'rb'))
     for w, trace_y in zip(wave, traces.y):
         assert len(w) == len(trace_y), "Size missmatch between used trace and static wavelength solution."
     return wave
 
 def load_reference_Th_spectrum(arm, veloce_paths):
+    """Load the reference Th spectrum for the ThAr calibration.
+    
+    Parameters:
+    - arm (str): The arm of the spectrograph ('red', 'green', or 'blue').
+    - veloce_paths (object): An object containing the paths to the data directories.
+    
+    Returns:
+    - ref_th_spectrum (numpy.ndarray): The array of flux values for the reference Th spectrum.
+    - ref_th_header (astropy.io.fits.Header): The header of the reference Th spectrum.
+    """
     ref_th_file = os.path.join(veloce_paths.wave_dir, f'Th_reference_spectrum_230828_{arm}.pkl')
     if not os.path.exists(ref_th_file):
         raise FileNotFoundError(f"Reference Th spectrum file not found: {ref_th_file}")
@@ -408,7 +597,7 @@ def load_reference_Th_spectrum(arm, veloce_paths):
 #             hdr = hdul[0].header
 #     else:
 #         master_flat, hdr = veloce_reduction_tools.get_master_mmap(
-#             obs_list, f"flat_{arm}", veloce_paths.input_dir,
+#             obs_list, veloce_paths.input_dir,
 #             date, arm, amplifier_mode)
 #         master_flat, hdr = veloce_reduction_tools.normalise_flat(master_flat, hdr)
 #         veloce_reduction_tools.save_image_fits(master_flat_filename, master_flat, hdr)
@@ -435,6 +624,15 @@ def append_column_to_recarray(array, column_name, column_data):
     return new_array
 
 def load_UVES_linelist(file):
+    """
+    Load the UVES ThAr linelist from a text file and convert it to a structured numpy array.
+    
+    Parameters:
+    - file: The path to the UVES linelist text file.
+    
+    Returns:
+    - data: A structured numpy array containing the linelist data with appropriate field names and types.
+    """
     # with field labels matching nist linelist
     types = np.array(['f', 'f', 'f', '<U2', '<U3', '<U1'])
     # columns = np.array(['wavenumber(cm-1)', 'air_wave(nm)', 'log_intens', 'Element', 'Ion', 'Reference'], dtype=str)
@@ -462,6 +660,18 @@ def load_UVES_linelist(file):
     return data
 
 def load_Th_linelist(veloce_paths, filename='Default', linelist_type='NIST'):
+    """
+    Load the ThAr linelist from a text file and convert it to a structured numpy array.
+    
+    Parameters:
+    - veloce_paths: The paths to the veloce data directories.
+    - filename: The name of the linelist file to load.
+    If 'Default', it will load the default linelist from the veloce_paths, which is from NIST.
+    - linelist_type: The type of linelist to load ('NIST' or 'UVES').
+
+    Returns:
+    - data: A structured numpy array containing the linelist data with appropriate field names and types.
+    """
     if linelist_type == 'NIST':
         if filename == 'Default':
             filename = 'th_linelist_NIST.pickle'
@@ -494,7 +704,7 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
     - plot: If True, generates plots to visualize the process.
 
     Returns:
-    - baseline: Normalized flux values after spline fitting.
+    - (numpy.ndarray): Normalized flux values after spline fitting.
     """
     if sum(np.isfinite(y)) < nknots:
         print("[Warning] Order length is less than number of knots. Normalisation not possible.")
@@ -793,7 +1003,20 @@ def normalise_ArcTh_order_with_spline(y, nknots=15, norm_type='continuum', node_
 def get_lines_in_order(wave, linelist, elements=None, intensity_threshold=None, flag=None):
     """
     Get the lines in the order from the linelist.
-    Wavelengths in linelist should be in air.
+
+    Parameters:
+    - wave (numpy.ndarray): 1D array of wavelengths in the order (in air).
+    - linelist (numpy.ndarray): Structured array containing the linelist with at least 'obs_wl_air(nm)' field.
+    - elements (list of str, optional): List of element symbols to filter the linelist (e.g., ['Th', 'Xe']).
+    If None, no filtering by element is applied. Default is None.
+    - intensity_threshold (int or tuple of int, optional): If int, only lines with intensity greater than or equal to this value are included.
+    If tuple (min_intensity, max_intensity), only lines with intensity within this range are included.
+    If None, no intensity filtering is applied. Default is None.
+    - flag (str or list of str, optional): If str, only lines with this intensity flag are included. If list of str, only lines with any of these flags are included.
+    If None, no filtering by intensity flag is applied. Default is None.
+
+    Returns:
+    - (numpy.ndarray): Structured array of lines from the linelist that fall within orders wavelength range and meet the specified criteria.
     """
     # Build mask for wavelength range
     mask = (linelist['obs_wl_air(nm)'] >= wave.min()) & (linelist['obs_wl_air(nm)'] <= wave.max())
@@ -822,32 +1045,43 @@ def get_lines_in_order(wave, linelist, elements=None, intensity_threshold=None, 
     # print(f"Found {np.sum(mask)} lines in the order.")
     return linelist[mask]
 
-def plot_order_with_lines(wave, thxe_order, linelist, original_solution=None):
-    plt.close('all')
+# def plot_order_with_lines(wave, thxe_order, linelist, original_solution=None):
+#     """
+#     Plot the ThAr order with the lines from the linelist and optionally the original solution.
+#     Parameters:
+#     - wave (numpy.ndarray): 1D array of wavelengths in the order (in air).
+#     - thxe_order (numpy.ndarray): 1D array of flux values for the ThAr order.
+#     - linelist (numpy.ndarray): Structured array containing the linelist with at least 'obs_wl_air(nm)' field.
+#     - original_solution (tuple of arrays, optional): Tuple containing (MATCH_LAM, GUESS_LAM) from the original solution to plot for comparison."""
+#
+#     Returns:
+#     - None: Displays a plot of the ThAr order with lines
+#     """
+#     plt.close('all')
+#
+#     plt.plot(wave, thxe_order, label='fibThAr')
+#
+#     lines = get_lines_in_order(wave, linelist, intensity_threshold=100)
+#     # lines = get_lines_in_order(veloce_reduction_tools.vacuum_to_air(wave[order]), nist_linelist, elements=['Th', 'Xe'], intensity_threshold=100)
+#     for line in lines:
+#         plt.axvline(line['obs_wl_air(nm)'], c='r', ls='--', label="linelist")
+#
+#     if original_solution is not None:
+#         MATCH_LAM, GUESS_LAM = original_solution
+#         for match_wave in MATCH_LAM:
+#             plt.axvline(veloce_reduction_tools.vacuum_to_air(match_wave), c='g', ls=':', label="match_wave")
+#         for guess_wave in GUESS_LAM:
+#             plt.axvline(veloce_reduction_tools.vacuum_to_air(guess_wave), c='b', ls=':', label="guess_wave")
+#     # Remove duplicate labels in legend
+#     handles, labels = plt.gca().get_legend_handles_labels()
+#     unique = dict()
+#     for h, l in zip(handles, labels):
+#         if l not in unique:
+#             unique[l] = h
+#     plt.legend(unique.values(), unique.keys())
+#     plt.show()
 
-    plt.plot(wave, thxe_order, label='arc ThXe')
-
-    lines = get_lines_in_order(wave, linelist, intensity_threshold=100)
-    # lines = get_lines_in_order(veloce_reduction_tools.vacuum_to_air(wave[order]), nist_linelist, elements=['Th', 'Xe'], intensity_threshold=100)
-    for line in lines:
-        plt.axvline(line['obs_wl_air(nm)'], c='r', ls='--', label="linelist")
-
-    if original_solution is not None:
-        MATCH_LAM, GUESS_LAM = original_solution
-        for match_wave in MATCH_LAM:
-            plt.axvline(veloce_reduction_tools.vacuum_to_air(match_wave), c='g', ls=':', label="match_wave")
-        for guess_wave in GUESS_LAM:
-            plt.axvline(veloce_reduction_tools.vacuum_to_air(guess_wave), c='b', ls=':', label="guess_wave")
-    # Remove duplicate labels in legend
-    handles, labels = plt.gca().get_legend_handles_labels()
-    unique = dict()
-    for h, l in zip(handles, labels):
-        if l not in unique:
-            unique[l] = h
-    plt.legend(unique.values(), unique.keys())
-    plt.show()
-
-def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, offset=0, plot=False):
+def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, offset=0, plot=False, verbose=False):
     """
     Fit spectral lines in a given order using a provided linelist and return the pixel and wavelength positions
     of successfully fitted lines.
@@ -914,6 +1148,7 @@ def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, offset=0, plot=
     passed_mask = []
     lines_pixel_positions = []
     lines_wave_positions = []
+    lines_sigma = []
     for line in lines:
         line_wave = line['obs_wl_air(nm)']
         idx = np.argmin(np.abs(wavelengths - line_wave))
@@ -995,53 +1230,64 @@ def fit_lines_in_order(wavelengths, flux, pixels, linelist, arm, offset=0, plot=
 
         # print(f"Fitting line {line_wave:.3f} nm at pixel {line_pixel:.2f}, peak height {peak_height:.2f}, floor {line_floor:.2f}")
 
-        p0 = [peak_height, center, 2, 2, line_floor]
-        bounds = ([0.9*peak_height, center-3, 1e-3, 1e-3, 0], [2*peak_height, center+3, 10, 10, np.max(y_fit)])
+        p0 = [peak_height, center, 2, 2, line_floor] # use general gaussian for peak position
+        _p0 = [peak_height, center, 2, line_floor] # use gaussian for line fwhm
+        bounds = ([0.5*peak_height, center-3, 1e-3, 1e-3, 0], [line_floor+2.5*peak_height, center+3, 5, 5, line_floor+0.5*peak_height])
+        _bounds = ([0.5*peak_height, center-3, 1e-3, 0], [line_floor+2.5*peak_height, center+3, 5, line_floor+0.5*peak_height])
         try:
             popt, _ = curve_fit(general_gaussian, x_fit_masked, y_fit_masked, p0=p0, bounds=bounds)
+            _popt, _ = curve_fit(gaussian, x_fit_masked, y_fit_masked, p0=_p0, bounds=_bounds) # use gaussian for line fwhm
             if plot:
                 plt.close('all')
-                plt.plot(x_fit, y_fit, 'b-', label='Data')
-                plt.scatter(x_fit_masked, y_fit_masked, c='k', s=5, label='Line points')
+                fig, ax = plt.subplots()
+                ax.plot(x_fit, y_fit, 'C0-', label='Data')
+                # plt.scatter(x_fit_masked, y_fit_masked, c='k', s=5, label='Line points')
+                ax.scatter(x_fit_masked, y_fit_masked, c='C0', s=5)
                 x_fine = np.arange(x_fit_masked.min(), x_fit_masked.max()+0.1, 0.1)
-                plt.plot(x_fine, general_gaussian(x_fine, *popt), 'r-', label='Fit')
-                plt.axvline(line_pixel, c='orange', ls=':', label='Line guess')
-                plt.axvline(center, c='green', ls=':', label='Closest peak')
-                plt.axvline(popt[1], c='red', ls=':', label='Fit center')
-                plt.title(f"Line {line_wave:.3f} nm")
-                plt.xlim(x_fit.min(), x_fit.max())
-                plt.ylim(min(0.7, y_fit.min()*0.9), general_gaussian(x_fine, *popt).max()*1.1)
-                plt.xlabel('Pixel')
-                plt.ylabel('Flux')
-                plt.legend()
+                ax.plot(x_fine, general_gaussian(x_fine, *popt), 'r-', label='Fit')
+                # plt.axvline(line_pixel, c='orange', ls=':', label='Line guess')
+                # plt.axvline(center, c='green', ls=':', label='Closest peak')
+                # plt.axvline(popt[1], c='red', ls=':', label='Fit center')
+                ax.set_title(f"Line {line_wave:.3f} nm")
+                ax.set_xlim(x_fit.min(), x_fit.max())
+                ax.set_ylim(min(0.7, y_fit.min()*0.9), general_gaussian(x_fine, *popt).max()*1.1)
+                ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+                ax.set_xlabel('Pixel')
+                ax.set_ylabel('Flux')
+                # plt.legend()
                 plt.show()
             passed_mask.append(True)
             lines_pixel_positions.append(popt[1])
             lines_wave_positions.append(line_wave)
+            lines_sigma.append(_popt[2])
+            # weight = _popt[0]*_popt[2]*np.sqrt(2*np.pi) #- _popt[3]*len(x_fit_masked)
+            # lines_weight.append(weight) # use gaussian for line fwhm
         except Exception as e:
-            # print(f"Fit failed for line {line_wave:.3f} nm: {e}")
             passed_mask.append(False)
+            if verbose:
+                print(f"Fit failed for line {line_wave:.3f} nm: {e}")
             # lines_pixel_positions.append(np.nan)
             # lines_wave_positions.append(np.nan)
     # Remove duplicate pixel positions and corresponding wavelengths
-    lines_wave_positions = np.array(lines_wave_positions)
     lines_pixel_positions = np.array(lines_pixel_positions)
     _, unique_indices = np.unique(lines_pixel_positions, return_index=True)
-    lines_wave_positions = lines_wave_positions[unique_indices]
     lines_pixel_positions = lines_pixel_positions[unique_indices]
+
+    lines_wave_positions = np.array(lines_wave_positions)[unique_indices]
+    lines_sigma = np.array(lines_sigma)[unique_indices]
+
     # print(f"Found {len(np.unique(lines_pixel_positions[~unique_indices]))} blends (two or more wavelengths corresponding to single peak).")
     passed_mask = np.array(passed_mask)
-    # passed_mask[~unique_indices] = False  # Mark duplicates as not passed
+    passed_mask[~unique_indices] = False  # Mark duplicates as not passed
     # Filter out lines that did not pass the selection criteria
     # print(f"Total lines passed: {np.sum(passed_mask)} out of {len(lines)}")
-    lines = np.array(lines)
-    lines = lines[passed_mask]
+    lines = np.array(lines)[passed_mask]
     # # Keep only unique pixel positions and corresponding wavelengths
     # lines_wave_positions = lines_wave_positions[passed_mask]
     # lines_pixel_positions = lines_pixel_positions[passed_mask]
     # print(f"Total lines fitted: {len(lines_pixel_positions)}")
     
-    return lines_pixel_positions, lines_wave_positions, lines
+    return lines_pixel_positions, lines_wave_positions, lines, lines_sigma
 
 def fit_all_lines_per_order(wave, norm_extracted_Th, ORDER, traces, linelist, arm, offset=0, veloce_paths=None, plot=False):
     """
@@ -1078,12 +1324,12 @@ def fit_all_lines_per_order(wave, norm_extracted_Th, ORDER, traces, linelist, ar
     determined by the spectrograph arm. It then fits spectral lines in each order using the provided line list.
     """
     #TODO: save fitted lines to file
-    pixel_positions, wave_positions, order_positions = [], [], []
+    pixel_positions, wave_positions, order_positions, fwhms = [], [], [], []
     # fitted_lines = []
     
     for order, absolute_order in enumerate(ORDER):
         # print(f"Fitting lines in order {absolute_order} ({order+1}/{len(ORDER)})")
-        lines_pixel_positions, lines_wave_positions, _fitted_lines = fit_lines_in_order(
+        lines_pixel_positions, lines_wave_positions, _fitted_lines, lines_sigmas = fit_lines_in_order(
             wave[order],
             norm_extracted_Th[order],
             traces.y[order],
@@ -1092,16 +1338,30 @@ def fit_all_lines_per_order(wave, norm_extracted_Th, ORDER, traces, linelist, ar
         pixel_positions.append(lines_pixel_positions)
         wave_positions.append(lines_wave_positions)
         order_positions.append(lines_order_positions)
+        fwhms.append(lines_sigmas*2.355)  # Convert sigma to FWHM for each line
         # fitted_lines.append(_fitted_lines)
     pixel_positions = np.concatenate(pixel_positions)
     wave_positions = np.concatenate(wave_positions)
     order_positions = np.concatenate(order_positions)
+    fwhms = np.concatenate(fwhms)
     # fitted_lines = np.concatenate(fitted_lines)
     # print(f"Total fitted lines: {len(np.unique(wave_positions))}")
 
-    return pixel_positions, wave_positions, order_positions
+    return pixel_positions, wave_positions, order_positions, fwhms
 
 def get_pixels_for_ArcTh_fit(orders, traces):
+    """
+    Get full pixel range for all orders to extrapolate the ThAr fit onto.
+
+    Parameters:
+    - orders (list or numpy.ndarray): List of orders to generate pixel ranges for.
+    - traces (object): A trace object. 
+
+    Returns:
+    - full_pixels (numpy.ndarray): 2D array of pixel indices for each order.
+    Each row corresponds to an order and contains the pixel indices that are extractable for it.
+    """
+
     max_extracted_pixel = max([max(trace_y) for trace_y in traces.y])
     min_extracted_pixel = min([min(trace_y) for trace_y in traces.y])
     full_pixels = np.array([np.arange(min_extracted_pixel, max_extracted_pixel + 1) for _ in orders])
@@ -1109,7 +1369,20 @@ def get_pixels_for_ArcTh_fit(orders, traces):
 
 def apply_n_limit_constraint(initial_mask, orders_position, y_fit, X, model, n_limit, all_idx, residuals):
     """
-    Apply n_limit constraint to any mask, ensuring minimum points per order.
+    Apply n_limit constraint to any mask, ensuring taht each order has at least minimum points (n_limit).
+
+    Parameters:
+    - initial_mask (numpy.ndarray): Initial boolean mask of inliers.
+    - orders_position (numpy.ndarray): Order positions corresponding to each data point.
+    - y_fit (numpy.ndarray): Array of fitted wavelength values for each data point.
+    - X (numpy.ndarray): Design matrix used for fitting the model.
+    - model (sklearn estimator): The fitted model used to predict wavelength values.
+    - n_limit (int): Minimum number of points required per order.
+    - all_idx (numpy.ndarray): Array of all indices corresponding to the data points.
+    - residuals (numpy.ndarray): Array of residuals for each data point.
+
+    Returns:
+    - constrained_mask (numpy.ndarray): Boolean mask meeting the n_limit constraint.
     """
     constrained_mask = np.zeros_like(initial_mask, dtype=bool)
     
@@ -1137,16 +1410,34 @@ def apply_n_limit_constraint(initial_mask, orders_position, y_fit, X, model, n_l
             
     return constrained_mask
 
-def fit_surface_sklearn(dispersion_position, orders_position, wave_array, extracted_pixels, degree=7, sigma_clip=3, robust=False, n_limit=0, seed=None, max_iter=1000):
+def fit_surface_sklearn(dispersion_position, orders_position, y_fit, extracted_pixels, degree=7, sigma_clip=3, robust=False, n_limit=0, seed=None, max_iter=1000):
     """
     Fit a bivariate polynomial surface to the wavelength solution using RANSAC for outlier rejection.
-    Returns fitted surface, residuals, and inlier mask.
+    
+    Parameters:
+    - dispersion_position (numpy.ndarray): Array of pixel positions along the dispersion direction for each fitted line.
+    - orders_position (numpy.ndarray): Array of order numbers corresponding to each fitted line.
+    - y_fit (numpy.ndarray): Array of wavelengths or resolutions values corresponding to each fitted line.
+    - extracted_pixels (numpy.ndarray): 2D array of pixel indices for each order to extrapolate the fit onto.
+    - degree (int): Degree of the polynomial surface to fit.
+    - sigma_clip (float): Sigma threshold for iterative outlier rejection.
+    - robust (bool): If True, use RANSAC for robust fitting. If False, use standard least squares fitting.
+    - n_limit (int): Minimum number of points required per order to be considered in the fit. If 0, no minimum is enforced.
+    - seed (int or None): Random seed for RANSAC reproducibility. If None, RANSAC will use a random seed.
+    - max_iter (int): Maximum number of iterations for the sigma clipping process.
+    
+    Returns:
+    - fitted surface (numpy.ndarray): 2D array of fitted wavelength values for each pixel in the extracted_pixels grid.
+    - residuals (numpy.ndarray): Array of residuals between the fitted surface and the input wavelength values for each data point.
+    - mask (numpy.ndarray): Boolean array indicating which data points were considered inliers after sigma clipping or RANSAC.
+    - model (sklearn estimator): The fitted model used to predict wavelengths
+    - converged (bool): Indicates whether the iterative sigma clipping process converged before reaching max_iter.
     """
     
     # Prepare data
     x = dispersion_position
     y = orders_position
-    y_fit = wave_array * orders_position
+    # y_fit = wave_array * orders_position
 
     grid_points = np.vstack([(pixel, abs_order) for i, abs_order in enumerate(np.unique(orders_position)) for pixel in extracted_pixels[i]])
 
@@ -1244,9 +1535,49 @@ def fit_surface_sklearn(dispersion_position, orders_position, wave_array, extrac
     return Z, residuals, mask, model, converged
 
 def get_wave_solution_from_surface(model, traces, ORDER):
+    """
+    For each order use model to predict wavelengths.
+
+    Parameters:
+    - model (sklearn estimator): The fitted model used to predict wavelengths.
+    - traces (object): A trace object.
+    - ORDER (list or numpy.ndarray): List of absolute order numbers.
+
+    Returns:
+    - wave_solution (list of numpy.ndarray): List of wavelength solutions for each order.
+    """
     return [model.predict((np.column_stack([trace_y, np.ones_like(trace_y)*absolute_order])))/absolute_order for absolute_order, trace_y in zip(ORDER, traces.y)]
 
+def get_resolution_from_surface(model, traces, ORDER):
+    """
+    For each order use model to predict resolution.
+
+    Parameters:
+    - model (sklearn estimator): The fitted model used to predict resolution.
+    - traces (object): A trace object.
+    - ORDER (list or numpy.ndarray): List of absolute order numbers.
+
+    Returns:
+    - resolution_solution (list of numpy.ndarray): List of resolution solutions for each order.
+    """
+    return [model.predict((np.column_stack([trace_y, np.ones_like(trace_y)*absolute_order]))) for absolute_order, trace_y in zip(ORDER, traces.y)]
+
 def get_arcTh_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, filename=None):
+    """
+    Load or compute the master ThAr image for the given arm and date.
+
+    Parameters:
+    - veloce_paths: An object containing paths to the data directories.
+    - arm: The spectrograph arm ('blue', 'green', or 'red').
+    - date: The date of the observations (used to find the relevant files).
+    - amplifier_mode: The amplifier mode used for the observations.
+    - obs_list: Optional. A dictionary containing lists of observation files.
+    - filename: Optional. If provided, the function will load the master ThAr image from this file instead of computing it.
+    
+    Returns:
+    - arcTh_image: The master ThAr image as a numpy array.
+    - hdr: The header associated with the master ThAr image.
+    """
     if filename is not None:
         arcTh_master_filename = filename
     else:
@@ -1262,7 +1593,7 @@ def get_arcTh_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, fil
             file_list = veloce_reduction_tools.get_longest_consecutive_files(file_list)
             if file_list:
                 arcTh_image, hdr = veloce_reduction_tools.get_master_mmap(
-                    file_list, f'ARC-ThAr_{arm}_master', veloce_paths.input_dir, date, arm, amplifier_mode)
+                    file_list, veloce_paths.input_dir, date, arm, amplifier_mode)
                 veloce_reduction_tools.save_image_fits(arcTh_master_filename, arcTh_image, hdr)
             else:
                 raise FileNotFoundError(f"No ARC-ThAr_{arm} files found for date {date}. Cannot create master.")
@@ -1270,10 +1601,62 @@ def get_arcTh_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, fil
             raise ValueError("Either obs_list or filename must be provided to get the arcTh master.")
     return arcTh_image, hdr
 
+def get_resolution_from_fitted_lines(fwhms, wave_positions, pixel_positions, order_positions, wave_solution, all_orders, traces):
+    """
+    Determine the spectral resolution from the fitted lines.
+
+    Parameters:
+    - fwhms: Array of FWHM values for the fitted lines.
+    - wave_positions: Array of wavelength positions corresponding to the fitted lines.
+    - pixel_positions: Array of pixel positions corresponding to the fitted lines.
+    - order_positions: Array of order positions corresponding to the fitted lines.
+    - wave_solution: The wavelength solution array.
+    - all_orders: List of all orders.
+    - traces: Trace object containing pixel positions for each order.
+
+    Returns:
+    - resolution: Estimated spectral resolution (R = lambda / delta_lambda) based on the fitted lines.
+    """
+    # Convert FWHM from pixels to wavelength units using the wavelength solution
+    _fwhms = np.zeros_like(fwhms)
+    # for i, order in enumerate(np.unique(order_positions)):
+    for i, order in enumerate(all_orders):
+        order_wave_solution = wave_solution[i]
+        order_mask = order_positions == order
+        if np.sum(order_mask) == 0:
+            continue
+        pixel_at_zero = int(traces.y[i][0])
+        _fwhms[order_mask] = fwhms[order_mask] * np.gradient(order_wave_solution)[pixel_positions[order_mask].astype(int)-pixel_at_zero]
+    resolutions = wave_positions / _fwhms
+
+    return resolutions
+
 # def calibrate_absolute_Th(extracted_science_orders, obs_list, veloce_paths, traces, thxe_image, hdr, arm, plot=False, filename=None):
-def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_mode, plot=False, plot_filename=None, th_linelist_filename='Default'):
+def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_mode, estimate_resolution=False, plot=False, plot_filename=None, th_linelist_filename='Default'):
+    """
+    Function to perform full wavelength calibration using ThAr.
+    If a wavelength solution file already exists for the given arm and date, it will be loaded.
+    Otherwise, a new wavelength solution will be computed using Th linelist.
+
+    Parameters:
+    - traces (object): Trace object containing pixel positions for each order.
+    - veloce_paths (object): Object containing paths to data directories.
+    - obs_list (dict): Dictionary containing lists of observation files.
+    - date (str): Date of the observation.
+    - arm (str): Spectrograph arm ('blue', 'green', or 'red').
+    - amplifier_mode (str): Amplifier mode used for the observations.
+    - plot (bool): If True, the diagnostic plots are made.
+    - plot_filename (str or None): If provided, the diagnostic plot will be saved to this file.
+    - th_linelist_filename (str): Filename for the Th linelist to use.
+    By 'Default', the NIST linelist will be loaded.
+
+    Returns:
+    - wave (list of numpy.ndarray): List of wavelength solutions for each order.
+    - resolution (list of numpy.ndarray): List of resolution solutions for each order.
+    """
     ### TODO: add header info to wavelength solution file, including params used, save fitted lines to file
     wave_solution_filename = f"arcTh_wave_{arm}_{date}.fits"
+    resolution_fit_filename = f"arcTh_resolution_{arm}_{date}.fits"
     if os.path.exists(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename)):
         print(f"Reading existing wavelength solution file {wave_solution_filename}")
         # wave = pickle.load(open(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename), 'rb'))
@@ -1296,7 +1679,7 @@ def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_m
 
         linelist = load_Th_linelist(veloce_paths, filename=th_linelist_filename, linelist_type='NIST')
 
-        extracted_arcTh, _ = veloce_reduction_tools.extract_orders_with_trace(arcTh_image, traces)
+        extracted_arcTh, extracted_arcTh_uncertainty, hdr_arcTh = veloce_reduction_tools.extract_orders_with_trace(arcTh_image, traces)
 
         if arm =='blue':
             nknots=13
@@ -1320,9 +1703,9 @@ def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_m
             offset = int(np.round(offset))
             print(f"Applying offset of {offset} pixels to initial guess positions.")
 
-        pixel_positions, wave_positions, order_positions = fit_all_lines_per_order(
+        pixel_positions, wave_positions, order_positions, fwhms = fit_all_lines_per_order(
             static_wave, extracted_arcTh, ORDER, traces, linelist, arm, offset=offset, plot=False)
-        
+
         if len(np.unique(order_positions)) != len(ORDER):
             print(f"[Warning]: {len(ORDER) - len(np.unique(order_positions))} order(s) don't have fitted lines.")
             missing_orders = [order for order in ORDER if order not in np.unique(order_positions)]
@@ -1333,18 +1716,18 @@ def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_m
         warnings.filterwarnings("ignore", category=LinAlgWarning)
         if arm == 'blue':
             Z, residuals, mask, model, converged = fit_surface_sklearn(
-                pixel_positions, order_positions, wave_positions,
+                pixel_positions, order_positions, wave_positions*order_positions,
                 full_pixels, degree=6, sigma_clip=2.3, robust=False, n_limit=8)
         elif arm == 'green':
             Z, residuals, mask, model, converged = fit_surface_sklearn(
-                pixel_positions, order_positions, wave_positions,
+                pixel_positions, order_positions, wave_positions*order_positions,
                 full_pixels, degree=7, sigma_clip=2.4, robust=False, n_limit=9)
             # Z, residuals, mask, model, converged = fit_surface_sklearn(
             #     pixel_positions, order_positions, wave_positions,
             #     full_pixels, degree=7, sigma_clip=2.2, robust=False, n_limit=9)
         elif arm == 'red':
             Z, residuals, mask, model, converged = fit_surface_sklearn(
-                pixel_positions, order_positions, wave_positions,
+                pixel_positions, order_positions, wave_positions*order_positions,
                 full_pixels, degree=7, sigma_clip=2.3, robust=False, n_limit=9)
         if not converged:
             print("[Warning]: Wavelength solution fitting did not converge.")
@@ -1358,6 +1741,26 @@ def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_m
             veloce_diagnostic.plot_ArcTh_points_positions(pixel_positions, order_positions, mask, veloce_paths, plot_filename)
             veloce_diagnostic.plot_ArcTh_residuals(residuals, order_positions, pixel_positions, wave_positions, mask, veloce_paths, plot_filename, plot_type='wavelength')
         
+        if estimate_resolution:
+            if os.path.exists(os.path.join(veloce_paths.wavelength_calibration_dir, resolution_fit_filename)):
+                print(f"There is an existing resolution fit: {resolution_fit_filename}")
+            else:
+                resolution_positions = get_resolution_from_fitted_lines(fwhms, wave_positions, pixel_positions, order_positions, wave, ORDER, traces)
+
+                res_Z, res_residuals, res_mask, res_model, converged = fit_surface_sklearn(
+                        pixel_positions, order_positions, resolution_positions,
+                        full_pixels, degree=1, sigma_clip=2, robust=False, n_limit=8)
+                if not converged:
+                    print("[Warning]: Resolution solution fitting did not converge.")
+                resolution = get_resolution_from_surface(res_model, traces, ORDER)
+            
+                veloce_reduction_tools.save_extracted_spectrum_fits(
+                    os.path.join(veloce_paths.wavelength_calibration_dir, resolution_fit_filename),
+                    wave,
+                    resolution,
+                    hdr)
+        else:
+            resolution = None
         # with open(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename), 'wb') as f:
         #     pickle.dump(wave, f)
 
@@ -1366,10 +1769,27 @@ def calibrate_absolute_Th(traces, veloce_paths, obs_list, date, arm, amplifier_m
             wave,
             extracted_arcTh,
             hdr)
+        
+        
     
-    return wave #, extracted_science_orders
+    return wave
 
 def get_LC_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, filename=None):
+    """
+    Load or compute the master LC image for the given arm and date.
+
+    Parameters:
+    - veloce_paths (object): An object containing paths to the data directories.
+    - arm (str): The spectrograph arm ('blue', 'green', or 'red').
+    - date (str): The date of the observations.
+    - amplifier_mode (int): The amplifier mode used.
+    - obs_list (dict): A list of observation files.
+    - filename (str): The filename of the master LC image.
+
+    Returns:
+    - LC_image: The master LC image as a numpy array.
+    - hdr: The header associated with the master LC image.
+    """
     if filename is not None:
         LC_master_filename = filename
     else:
@@ -1381,11 +1801,11 @@ def get_LC_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, filena
             hdr = hdul[0].header
     else:
         if obs_list is not None:
-            file_list = obs_list[f'SimLC'][date]
+            file_list = [file for file in obs_list[f'SimLC'][date] if int(file[-10]) == arm_nums[arm]]
             file_list = veloce_reduction_tools.get_longest_consecutive_files(file_list)
             if file_list:
                 LC_image, hdr = veloce_reduction_tools.get_master_mmap(
-                    file_list, f'SimLC_{arm}_master', veloce_paths.input_dir, date, arm, amplifier_mode)
+                    file_list, veloce_paths.input_dir, date, arm, amplifier_mode)
                 veloce_reduction_tools.save_image_fits(LC_master_filename, LC_image, hdr)
             else:
                 raise FileNotFoundError(f"No SimLC files found for date {date}. Cannot create master.")
@@ -1394,17 +1814,495 @@ def get_LC_master(veloce_paths, arm, date, amplifier_mode, obs_list=None, filena
     return LC_image, hdr
 
 def select_lc_lines_in_wave_range(lc_lines, wave):
+    """
+    Selects Laser Comb lines that fall within given wavelength range.
+
+    Parameters:
+    - lc_lines (numpy.ndarray): Array of wavelengths of the Laser Comb lines.
+    - wave (list of numpy.ndarray): List of wavelength solutions for each order.
+
+    Returns:
+    - (numpy.ndarray): Array of wavelengths of the Laser Comb lines that fall within the specified range.
+    """
     wave_min, wave_max = min(wave), max(wave)
     return lc_lines[(lc_lines >= wave_min) & (lc_lines <= wave_max)]
 
-def build_LC_wavelength_solution(traces, veloce_paths, date, arm, amplifier_mode, obs_list, config, plot=False, filename=None):
+def fit_lc_peaks_in_order(wavelengths, flux, pixels, lc_lines, arm, offset=0, plot=False, verbose=False):
+    ### need different conditions for each arm
+    lines = select_lc_lines_in_wave_range(lc_lines, wavelengths)
+    criteria_use = {'position': 0, 'height': 0, 'asymmetry': 0, 'n_points': 0}
+    # peak_position_threshold = max(5.0, int(abs(offset)+1.5))
+    peak_position_threshold = 3.0
+    peak_position_bound = 1.5
+    # peak_asymmetry_threshold = 0.2
+    if arm == 'red':
+        # peak_height_threshold = 20.0
+        peak_height_threshold = 50.0
+    elif arm == 'green':
+        # peak_height_threshold = 20.0
+        peak_height_threshold = 50.0
+    elif arm == 'blue':
+        raise ValueError("Blue arm doesn't have LC.")
+    
+    pixels = np.array(pixels, dtype=np.int_)
+    min_pixel, max_pixel = np.min(pixels), np.max(pixels)
+    lines_pixel_positions = []
+    lines_wave_positions = []
+    # lines_sigmas = []
+    # lines_weights = []
+    for iter, line_wave in enumerate(lines):
+        discard = False
+        idx = int(np.argmin(np.abs(wavelengths - line_wave)) + offset)
+        if idx  < max((min_pixel+3), 200)  or (min_pixel + idx) > min((max_pixel - 3), 3900):
+            if verbose:
+                print(f"Line {line_wave:.3f} nm at index {idx} is too close to ithe edge of the order.")
+            # lines_pixel_positions.append(np.nan)
+            # lines_wave_positions.append(np.nan)
+            # lines_sigmas.append(np.nan)
+            # lines_weights.append(np.nan)
+            continue
+            # discard = True
+            # criteria_use['position'] += 1
+        line_pixel = min_pixel + idx + (line_wave - wavelengths[idx])/(wavelengths[idx+1] - wavelengths[idx]) \
+            if line_wave - wavelengths[idx] > 0 \
+            else min_pixel + idx + (line_wave - wavelengths[idx])/(wavelengths[idx] - wavelengths[idx-1])
+        # line_pixel+=offset
+
+        # fit_range = slice(max(0, int(idx-peak_position_threshold+offset)), min(len(pixels), int(idx+peak_position_threshold+1+offset)))
+        fit_range = slice(max(0, int(idx-peak_position_threshold)), min(len(pixels)-1, int(idx+peak_position_threshold+1)))
+        x_fit = pixels[fit_range]
+        y_fit = flux[fit_range]
+
+        # peaks, _ = find_peaks(y_fit, prominence=peak_height_threshold/2)
+        peaks, _ = find_peaks(y_fit, prominence=peak_height_threshold)
+        if len(peaks) == 0:
+            if verbose:
+                print(f"No peaks found for line {line_wave:.3f} nm.")
+            # lines_pixel_positions.append(np.nan)
+            # lines_wave_positions.append(np.nan)
+            # lines_sigmas.append(np.nan)
+            # lines_weights.append(np.nan)
+            continue
+            # discard = True
+        local_peak_idx = peaks[np.argmin(np.abs(x_fit[peaks] - line_pixel))]
+        peak_x = x_fit[local_peak_idx]
+        peak_y = y_fit[local_peak_idx]
+        # update fitting range to be around the found peak
+        peak_idx = int(peak_x-min_pixel)
+        
+        fit_range = slice(max(0, int(peak_idx-peak_position_threshold)), min(len(pixels), int(peak_idx+peak_position_threshold+1)))
+        x_fit = pixels[fit_range]
+        y_fit = flux[fit_range]
+        # print(line_pixel, peak_x, peak_idx, x_fit.min(), x_fit.max())
+        
+        if abs(peak_x-line_pixel) > peak_position_threshold:
+            if verbose:
+                print(f"Peak {peak_x} for line {line_wave:.3f} nm is too far from the guess pixel {line_pixel:.2f}.")
+            # if line_wave - wavelengths[idx] > 0:
+            #     print((line_wave - wavelengths[idx])/(wavelengths[idx+1] - wavelengths[idx]))
+            # else:
+            #     print((line_wave - wavelengths[idx])/(wavelengths[idx] - wavelengths[idx-1]))
+            # lines_pixel_positions.append(np.nan)
+            # lines_wave_positions.append(np.nan)
+            # lines_sigmas.append(np.nan)
+            # lines_weights.append(np.nan)
+            continue
+            # discard = True
+            # criteria_use['position'] += 1
+
+        if peak_y < peak_height_threshold:
+            if verbose:
+                print(f"Peak height for line {line_wave:.3f} nm is too low: {peak_y:.2f}.")
+            # lines_pixel_positions.append(np.nan)
+            # lines_wave_positions.append(np.nan)
+            # lines_sigmas.append(np.nan)
+            # lines_weights.append(np.nan)
+            continue
+            # discard = True
+            # criteria_use['height'] += 1
+        
+        # get an area between 1 and y_fit points:
+         
+        # print(f"Fitting line {line_wave:.3f} nm at pixel {line_pixel:.2f}, peak height {peak_height:.2f}, floor {line_floor:.2f}")
+
+        # p0 = [peak_y, peak_x, 2, 2, 1] # general gaussian
+        p0 = [peak_y, peak_x, 2, 1] # simple gaussian
+        # bounds = ([0.8*peak_y, peak_x-peak_position_bound, 1e-3, 1e-3, 0], [5*peak_y, peak_x+peak_position_bound, 5, 5, 0.5*peak_y]) # general gaussian
+        bounds = ([0.8*peak_y, peak_x-peak_position_bound, 1e-3, 0], [2.5*peak_y, peak_x+peak_position_bound, 5, 0.5*peak_y]) # simple gaussian
+        
+        try:
+            # popt, pcov = curve_fit(veloce_wavecalib.general_gaussian, x_fit, y_fit, p0=p0, bounds=bounds)
+            popt, pcov = curve_fit(gaussian, x_fit, y_fit, p0=p0, bounds=bounds)
+            # Calculate uncertainty for popt[1] (the fitted peak position)
+            perr = np.sqrt(np.diag(pcov))
+            uncertainty = perr[1]
+            # if iter == plot:
+            if verbose:
+                print(f"Fitted line {line_wave:.3f} nm at pixel {popt[1]:.2f} +/- {uncertainty:.3f}")
+                # print(f"Parameters of the fit:")
+                # print(f"Amplitude={popt[0]:.2f},\nCenter={popt[1]:.2f},\nsigma={popt[2]:.2f},\nBeta={popt[3]:.2f},\nbaseline={popt[4]:.2f}")
+            # print(popt)
+            if plot:
+                plt.close('all')
+                plt.plot(x_fit, y_fit, 'b-', label='Data')
+                plt.scatter(x_fit, y_fit, c='k', s=5, label='Line points')
+                x_fine = np.arange(x_fit.min(), x_fit.max()+0.1, 0.1)
+                # plt.plot(x_fine, veloce_wavecalib.general_gaussian(x_fine, *popt), 'r-', label='Fit')
+                plt.plot(x_fine, gaussian(x_fine, *popt), 'r-', label='Fit')
+                plt.axvline(line_pixel, c='orange', ls=':', label='Line guess')
+                plt.axvline(peak_x, c='green', ls=':', label='Closest peak')
+                plt.axvline(popt[1], c='red', ls=':', label='Fit center')
+                plt.title(f"Line {line_wave:.3f} nm")
+                plt.xlim(x_fit.min(), x_fit.max())
+                # plt.ylim(min(0.7, y_fit.min()*0.9), veloce_wavecalib.general_gaussian(x_fine, *popt).max()*1.1)
+                # plt.ylim(min(0.7, y_fit.min()*0.9), gaussian(x_fine, *popt).max()*1.1)
+                plt.xlabel('Pixel')
+                plt.ylabel('Flux')
+                plt.legend()
+                plt.show()
+            lines_pixel_positions.append(popt[1])
+            lines_wave_positions.append(line_wave)
+            # lines_sigmas.append(popt[2])
+            # print(1/np.sum(y_fit - popt[-1]), uncertainty**2)
+            # if verbose:
+            #     print(f"Weight: {1/np.sqrt(1/np.sum(y_fit - popt[-1])+uncertainty**2)}")
+            # lines_weights.append(1/np.sqrt(1/np.sum(y_fit - popt[-1])+uncertainty**2))
+        except Exception as e:
+            lines_pixel_positions.append(np.nan)
+            lines_wave_positions.append(np.nan)
+            # lines_weights.append(np.nan)
+            # lines_sigmas.append(np.nan)
+            if verbose:
+                print(f"Failed to fit line {line_wave:.3f} nm: {e}")
+            continue
+    lines_wave_positions = np.array(lines_wave_positions)
+    lines_pixel_positions = np.array(lines_pixel_positions)
+    # lines_weights = np.array(lines_weights)
+    # lines_sigmas = np.array(lines_sigmas)
+
+    return lines_pixel_positions, lines_wave_positions
+
+def remove_lc_background(y, plot=False):
+    ### takes lc spectrum, finds background by flipping it and applying find_peaks, fits a spline to the background peaks and subtracts it
+    pixel = np.arange(len(y))
+    y_flipped = np.max(y) - y
+    peaks, _ = find_peaks(y_flipped)
+    # fit spline to background peaks
+    try:
+        spline = make_interp_spline(peaks, y[peaks], k=3)
+        background = spline(pixel)
+        y_corrected = y - background
+    except Exception as e:
+        print(f"Failed to fit spline to background because: {e}. Returning original spectrum without background subtraction.")
+        return y
+    
+    if plot:
+        plt.close('all')
+        plt.figure(figsize=(10,6))
+        plt.subplot(2,1,1)
+        plt.plot(pixel, y, label='Original spectrum')
+        plt.scatter(peaks, y[peaks], color='red', label='Background peaks')
+        plt.plot(pixel, background, label='Fitted background')
+        plt.subplot(2,1,2)
+        plt.plot(pixel, y_corrected, label='Background subtracted spectrum')
+        plt.scatter(peaks, y_corrected[peaks], color='red', label='Background peaks')
+        plt.legend()
+        plt.show()
+    return y_corrected
+
+def fit_all_lc_lines_per_order(wave, extracted_spectrum, ORDER, traces, lc_lines, arm, offset=0):
+    pixel_positions, wave_positions, order_positions = [], [], []
+    for order, absolute_order in enumerate(ORDER):
+        # print(f"Fitting lines in order {absolute_order} ({order+1}/{len(ORDER)})")
+        lines_pixel_positions, lines_wave_positions  = fit_lc_peaks_in_order(
+            wave[order],
+            remove_lc_background(extracted_spectrum[order]),
+            traces.y[order],
+            lc_lines,
+            arm,
+            offset=offset)
+        lines_order_positions = np.ones_like(lines_pixel_positions) * absolute_order
+        pixel_positions.append(lines_pixel_positions)
+        order_positions.append(lines_order_positions)
+        wave_positions.append(lines_wave_positions)
+        # fwhms.append(lines_sigmas*2.355)
+        # weights.append(lines_weights)
+        # fitted_lines.append(_fitted_lines)
+        # print(f"Found {np.sum(np.isfinite(lines_pixel_positions))} lines.")
+        # print("---")
+    pixel_positions = np.concatenate(pixel_positions)
+    wave_positions = np.concatenate(wave_positions)
+    order_positions = np.concatenate(order_positions)
+    # fwhms = np.concatenate(fwhms)
+    # weights = np.concatenate(weights)
+    # fitted_lines = np.concatenate(fitted_lines)
+
+    return pixel_positions, wave_positions, order_positions
+
+def get_orders_with_lc_lines(ORDER, order_positions, pixel_positions):
+    # unique_orders = np.unique(order_positions[np.isfinite(order_positions)])
+    orders_with_lines = [order for order in ORDER if np.sum(np.isfinite(pixel_positions[order_positions==order]))>50]
+    # orders_with_lines = [order for order in ORDER if order in unique_orders]
+    mask = np.array([order in orders_with_lines for order in order_positions]) & np.isfinite(pixel_positions)
+    return orders_with_lines, mask
+
+def _scale_X_and_grid(X_raw, grid_points, method='none'):
+    """
+    Scale input design matrix X and grid points for prediction.
+
+    method: 'standard'|'minmax'|'robust'|None
+    """
+    if method is None or method == 'none':
+        scaler = None
+        X = X_raw.copy()
+        grid_scaled = grid_points.copy()
+    else:
+        if method == 'minmax':
+            scaler = MinMaxScaler(feature_range=(-1.0, 1.0))
+        elif method == 'robust':
+            scaler = RobustScaler()
+        elif method == 'standard':
+            scaler = StandardScaler()
+        else:
+            raise ValueError(f"Unknown scaling method: {method}")
+        X = scaler.fit_transform(X_raw)
+        grid_scaled = scaler.transform(grid_points)
+    return scaler, X, grid_scaled
+
+def monomial_powers_2d(degree_x, degree_y):
+    """
+    Generate list of (i,j) powers for 2D monomials up to degree_x in x and degree_y in y.
+    """
+    powers = [(i, j) for i in range(degree_x + 1) for j in range(degree_y + 1) if i + j <= max(degree_x, degree_y)]
+    return powers
+
+# def monomial_powers_2d(degree):
+#     return [(i, j) for i in range(degree + 1) for j in range(degree - i + 1)]
+
+def build_design_matrix(x, y, powers):
+    return np.stack([x**i * y**j for i, j in powers], axis=-1)
+
+class PolyXYFeatures(BaseEstimator, TransformerMixin):
+    def __init__(self, degree_x=9, degree_y=5):
+        self.degree_x = degree_x
+        self.degree_y = degree_y
+        self.powers_ = monomial_powers_2d(degree_x, degree_y)
+
+    def fit(self, X, y=None):
+        X = check_array(X)
+        if X.shape[1] != 2:
+            raise ValueError("Input must have exactly two columns: x and y.")
+        return self
+    
+    def transform(self, X):
+        X = check_array(X)
+        x, y = X[:, 0], X[:, 1]
+        return build_design_matrix(x, y, self.powers_)
+
+def fit_xy_surface_sklearn(dispersion_position, orders_position, wave_array, extracted_pixels,
+                           degree_x=7, degree_y=5, sigma_clip=2.5, max_iter=1000, ridge_alpha=0.01,
+                           input_scaling='minmax', target_scaling='standard', fit_type='wavelength'):
+    """
+    Simplified bivariate polynomial surface fit WITH optional target scaling.
+
+    Fits z = wave_array * order as a 2D polynomial in (pixel, order) with iterative
+    sigma-clipping to remove outliers. Returns (Z_grid (nm), residuals (nm), inlier_mask, model, converged).
+    target_scaling: 'standard'|'minmax'|'robust'|None
+    """
+    # Prepare data
+    x = np.asarray(dispersion_position, dtype=np.float64)
+    orders = np.asarray(orders_position, dtype=np.float64)
+    if fit_type == 'wavelength':
+        z_fit = np.asarray(wave_array * orders, dtype=np.float64)  # original units (nm * order)
+    elif fit_type == 'resolution':
+        z_fit = np.asarray(wave_array, dtype=np.float64)
+    else:
+        raise ValueError(f"Unknown fit_type: {fit_type}")
+
+    # Grid for prediction (expects extracted_pixels shaped (n_orders, n_pix_each))
+    grid_points = np.vstack([
+        (pixel, abs_order)
+        for i, abs_order in enumerate(np.unique(orders))
+        for pixel in extracted_pixels[i]
+    ]).astype(np.float64)
+
+    # Design matrix input
+    X_raw = np.column_stack([x, orders]).astype(np.float64)
+    finite = np.isfinite(z_fit)
+    if not np.any(finite):
+        raise ValueError("No finite target values to fit.")
+    
+    # scale inputs
+    scaler, X, grid_points = _scale_X_and_grid(X_raw, grid_points, method=input_scaling)
+
+    # scale target (z)
+    if target_scaling is None or target_scaling == 'none':
+        z = z_fit.copy()
+        z_scaler = None
+    else:
+        if target_scaling == 'minmax':
+            z_scaler = MinMaxScaler(feature_range=(-1.0, 1.0))
+        elif target_scaling == 'robust':
+            z_scaler = RobustScaler()
+        else:
+            z_scaler = StandardScaler()
+        z = z_scaler.fit_transform(z_fit.reshape(-1, 1)).ravel()
+
+    # Pipeline: polynomial features -> ridge regression
+    model = Pipeline([
+        ('poly', PolyXYFeatures(degree_x=degree_x, degree_y=degree_y)),
+        ('ridge', Ridge(alpha=ridge_alpha, fit_intercept=True))
+    ])
+
+    # Initial fit using all finite points
+    mask = finite.copy()
+    powers = monomial_powers_2d(degree_x, degree_y)
+    n_params = len(powers)
+
+    converged = False
+    init_resid = None
+
+    for iteration in range(max_iter):
+        # ensure system is not under-determined
+        if np.sum(mask) <= 5 * n_params:
+            print(f"[Warning]: Not enough points to fit the model robustly. Stopping iteration {iteration+1}.")
+            break
+
+        model.fit(X[mask], z[mask])
+        pred_scaled = model.predict(X)
+        residuals_scaled = z - pred_scaled
+
+        if init_resid is None:
+            init_resid = np.std(residuals_scaled[mask])
+
+        std_dev = np.std(residuals_scaled[mask]) if np.sum(mask) > 1 else init_resid
+        if not np.isfinite(std_dev) or std_dev == 0:
+            converged = True
+            print(f"[Warning]: Standard deviation of residuals is non-finite or zero. Stopping iteration {iteration+1}.")
+            break
+
+        new_mask = np.abs(residuals_scaled) < (sigma_clip * std_dev)
+
+        if np.array_equal(mask, new_mask):
+            converged = True
+            print(f"Converged after {iteration+1} iterations.")
+            break
+
+        mask = new_mask
+
+    # final predictions (convert back to original z units)
+    final_pred_scaled = model.predict(X)
+    if z_scaler is not None:
+        final_pred = z_scaler.inverse_transform(final_pred_scaled.reshape(-1, 1)).ravel()
+    else:
+        final_pred = final_pred_scaled
+    residuals = z_fit - final_pred
+
+    # predict on scaled grid and reshape to original extracted_pixels layout (inverse-transform)
+    grid_pred_scaled = model.predict(grid_points)
+    if z_scaler is not None:
+        Z = z_scaler.inverse_transform(grid_pred_scaled.reshape(-1, 1)).ravel().reshape(extracted_pixels.shape)
+    else:
+        Z = grid_pred_scaled.reshape(extracted_pixels.shape)
+
+    return Z, residuals, mask, model, converged, scaler, z_scaler
+
+def predict_lc_wavelength_from_surface(model, y_traces, orders, input_scaler=None, target_scaler=None):
+    """
+    Predict wavelength (same units as original wave) from a fitted surface model.
+
+    model: fitted sklearn estimator mapping (pixel, order) -> z where z = wavelength * order
+    x: array-like dispersion positions (pixels)
+    orders: array-like orders (same shape as x)
+    input_scaler: scaler used to transform X before fitting (e.g. returned by _scale_X_and_grid). If None, X is passed raw.
+    z_scaler: scaler used on target z during fitting (if any). If provided, inverse_transform will be applied.
+
+    Returns: numpy array of predicted wavelengths (same shape as x)
+    """
+    wavelengths = []
+    for trace_y, order in zip(y_traces, orders):
+        order_arr = np.ones_like(trace_y)*order
+
+        X = np.column_stack([trace_y, order_arr])
+
+        if input_scaler is not None:
+            X_in = input_scaler.transform(X)
+        else:
+            X_in = X
+
+        z_pred = np.asarray(model.predict(X_in)).ravel()
+
+        if target_scaler is not None:
+            # supports scikit-learn scalers
+            z_pred = np.asarray(target_scaler.inverse_transform(z_pred.reshape(-1, 1))).ravel()
+
+        wavelengths.append(z_pred / order_arr)
+    return wavelengths
+
+def get_calibrated_pixels(order_list, traces, pixel_positions, order_positions, fitted_orders):
+    """
+    Trims the edges of the orders based on the fitted LC line positions to get the pixels that are reliably calibrated by the LC lines in each order.
+
+    Parameters:
+    - order_list (list): List of all orders.
+    - traces (Traces): The traces for the Laser Comb.
+    - pixel_positions (numpy.ndarray): The pixel positions of the fitted LC lines.
+    - order_positions (numpy.ndarray): The corresponding order positions of the fitted LC lines.
+    - fitted_orders (list): List of orders that have fitted LC lines.
+    
+    Returns:
+    - calibrated_pixels_per_order (list of numpy.ndarray): A list where each element is a boolean array. True is calibrated, False - discard.
+    """
+    calibrated_pixels_per_order = []
+    for i, order in enumerate(order_list):
+        if order in fitted_orders:
+            pixel_in_order = pixel_positions[order_positions == order]
+            for j, pixel in enumerate(pixel_in_order):
+                if abs(pixel_in_order[j+1] - pixel) > 50:
+                    pixel_in_order[j] = np.nan
+                else:
+                    break
+            for j, pixel in enumerate(pixel_in_order[::-1]):
+                if abs(pixel_in_order[len(pixel_in_order)-2-j] - pixel) > 50:
+                    pixel_in_order[len(pixel_in_order)-1-j] = np.nan
+                else:
+                    break
+            
+            calibrated_pixels = (traces.y[i] > np.nanmin(pixel_in_order)) & (traces.y[i] < np.nanmax(pixel_in_order))
+            # print(len(calibrated_pixels), len(traces.y[i]), order)
+            calibrated_pixels_per_order.append(calibrated_pixels)
+        else:
+            calibrated_pixels = np.zeros_like(traces.y[i], dtype=bool)
+            calibrated_pixels_per_order.append(calibrated_pixels)
+
+    return calibrated_pixels_per_order
+
+def build_LC_wavelength_solution(traces, veloce_paths, date, arm, amplifier_mode, obs_list, estimate_resolution=False, plot=False, filename=None):
+    """
+    Builds the new wavelength solution for the Laser Comb.
+
+    Parameters:
+    - traces (Traces): The traces for the Laser Comb.
+    - veloce_paths (object): An object containing paths to the data directories.
+    - date (str): The date of the observations.
+    - arm (str): The spectrograph arm ('blue', 'green', or 'red').
+    - amplifier_mode (int): The amplifier mode used.
+    - obs_list (dict): A list of observation files.
+    - estimate_resolution (bool): If True, estimate the resolution (but from arcTh).
+    - plot (bool): If True, the diagnostic plots are made.
+
+    Returns:
+    - wave (numpy.ndarray): The wavelength solution.
+    """
+    ### TODO: finish this function, line fitting, surface model, predict waves, save to file, plot diagnostics
     wave_solution_filename = f"LC_wave_{arm}_{date}.fits"
     if os.path.exists(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename)):
         print(f"Reading existing wavelength solution file {wave_solution_filename}")
         wave, _, _ = veloce_reduction_tools.load_extracted_spectrum_fits(
             os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename))
     else:
-        lc_image, hdr = get_LC_master(veloce_paths, arm, date, amplifier_mode, obs_list=obs_list, filename=None)
+
+        lc_image, header = get_LC_master(veloce_paths, arm, date, amplifier_mode, obs_list=obs_list, filename=None)
         print(f"Building new wavelength solution for LC based on {arm} arm Th wavelength solution on {date}")
         lc_traces = veloce_reduction_tools.Traces.load_traces(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_LC_trace.pkl'))
         ref_traces = veloce_reduction_tools.Traces.load_traces(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_sim_calib_trace.pkl'))
@@ -1412,23 +2310,88 @@ def build_LC_wavelength_solution(traces, veloce_paths, date, arm, amplifier_mode
         if np.any(np.abs(np.array(offsets)) > 1.0):
             new_traces_x = [x+offset for x, offset in zip(lc_traces.x, offsets)]
             lc_traces.set_traces_yx(lc_traces.y, new_traces_x)
-        extracted_LC, extracted_LC_imgs = veloce_reduction_tools.extract_orders_with_trace(lc_image, lc_traces)
+        extracted_LC, extracted_LC_uncertainty, extracted_LC_imgs = veloce_reduction_tools.extract_orders_with_trace(lc_image, lc_traces)
 
+        ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = veloce_reduction_tools.load_prefitted_wave(arm=arm, wave_path=veloce_paths.wave_dir)
         arcTh_wave = calibrate_absolute_Th(traces, veloce_paths, obs_list,
-                                date, arm, amplifier_mode,
+                                date, arm, amplifier_mode, estimate_resolution=estimate_resolution,
                                 plot=plot, plot_filename=f'arcTh_wavecalib_{arm}_{date}',
-                                th_linelist_filename='Default')
+                                th_linelist_filename='Default', )
+        vacuum_static_wave = [veloce_reduction_tools.air_to_vacuum(th_order[np.isfinite(th_order)]) for th_order in arcTh_wave]
 
-        if hdr is not None and (hdr['FREQREF'] != REPETITION_RATE and hdr['FOFFFREQ'] != OFFSET_FREQUENCY):
+        if header is not None and (header['FREQREF'] != REPETITION_RATE and header['FOFFFREQ'] != OFFSET_FREQUENCY):
             raise ValueError("Repetition rate and offset frequency do not match the values of LC solution.")
-        freq_start = c/(950e-9)
-        freq_end =  c/(430e-9)
-        n_start = np.floor((freq_start - OFFSET_FREQUENCY)/REPETITION_RATE)
-        n_end = np.ceil((freq_end - OFFSET_FREQUENCY)/REPETITION_RATE)
-        n = np.arange(n_start, n_end, 1)
-        lc_lines = c/(OFFSET_FREQUENCY+n*REPETITION_RATE)*1e9
+        freq_start = SPEED_OF_LIGHT/(950e-9)
+        freq_end =  SPEED_OF_LIGHT/(450e-9)
+        n = np.arange(np.floor((freq_start - OFFSET_FREQUENCY)/REPETITION_RATE), np.ceil((freq_end - OFFSET_FREQUENCY)/REPETITION_RATE), 1)
+        lc_lines = SPEED_OF_LIGHT/(OFFSET_FREQUENCY+n*REPETITION_RATE)*1e9
 
-    return wave #, extracted_LC
+        _pixel_positions, _wave_positions, _order_positions = fit_all_lc_lines_per_order(vacuum_static_wave, extracted_LC, ORDER, traces, lc_lines, arm, offset=0)
+
+        fitted_orders, order_mask = get_orders_with_lc_lines(ORDER, _order_positions, _pixel_positions)
+
+        pixel_positions, wave_positions, order_positions = _pixel_positions[order_mask], _wave_positions[order_mask], _order_positions[order_mask]
+
+        max_extracted_pixel = max([max(trace_y) for trace_y in traces.y])
+        min_extracted_pixel = min([min(trace_y) for trace_y in traces.y])
+        full_pixels = np.array([np.arange(min_extracted_pixel, max_extracted_pixel + 1) for _ in range(len(fitted_orders))])
+
+        if arm == 'green':
+            Z, residuals, mask, model, converged, input_scaler, target_scaler = fit_xy_surface_sklearn(pixel_positions, order_positions, wave_positions, full_pixels,
+                                degree_x=13, degree_y=8, sigma_clip=3, max_iter=1000, ridge_alpha=0.001,
+                                input_scaling='minmax', target_scaling='standard')
+        elif arm == 'red':
+            Z, residuals, mask, model, converged, input_scaler, target_scaler = fit_xy_surface_sklearn(pixel_positions, order_positions, wave_positions, full_pixels,
+                                degree_x=9, degree_y=7, sigma_clip=3, max_iter=1000, ridge_alpha=0.001,
+                                input_scaling='minmax', target_scaling='standard')
+        stdev_vel = np.std(residuals[mask]/order_positions[mask]/wave_positions[mask])*c/np.sqrt(np.sum(mask))
+        print(f"SE: {stdev_vel:.2f}, with mean deviation from model: {np.mean(residuals[mask]/order_positions[mask]/wave_positions[mask]):.2e}, based on {np.sum(mask)}/{len(mask)} points.")
+    
+        calibrated_pixels_per_order = get_calibrated_pixels(ORDER, traces, pixel_positions, order_positions, fitted_orders)
+        # order_mask = [i for i, order in enumerate(ORDER) if order in fitted_orders]
+        fitted_traces = [traces.y[i][calibrated_pixels] for i, calibrated_pixels in enumerate(calibrated_pixels_per_order) if np.any(calibrated_pixels)]
+        wave = predict_lc_wavelength_from_surface(model, fitted_traces, fitted_orders, input_scaler=input_scaler, target_scaler=target_scaler)
+        # wave = [veloce_reduction_tools.vacuum_to_air(w) for w in wave]
+        # fitted_extracted_LC = [extracted_LC[i] for i, order in enumerate(ORDER) if order in fitted_orders]
+        fitted_extracted_LC = [extracted_LC[i][calibrated_pixels] for i, calibrated_pixels in enumerate(calibrated_pixels_per_order) if np.any(calibrated_pixels)]
+        fitted_extracted_LC_uncertainty = [extracted_LC_uncertainty[i][calibrated_pixels] for i, calibrated_pixels in enumerate(calibrated_pixels_per_order) if np.any(calibrated_pixels)]
+
+        shifts = np.load(os.path.join(veloce_paths.wave_dir, f'{arm}_velocity_orders_offsets.npy'))
+        shifts = [shifts[i] for i, order in enumerate(ORDER) if order in fitted_orders]
+        wave = [w * (1 + shift/SPEED_OF_LIGHT) for w, shift in zip(wave, shifts)]
+
+        print(f"Saving new LC wavelength solution to {os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename)}")
+        veloce_reduction_tools.save_extracted_spectrum_fits(os.path.join(veloce_paths.wavelength_calibration_dir, wave_solution_filename), wave, fitted_extracted_LC, header, err=fitted_extracted_LC_uncertainty)
+    
+    return wave, calibrated_pixels_per_order #, extracted_LC
 
 def calibrate_simTh():
     raise NotImplementedError
+
+def add_predetermined_resolution(arm, date, veloce_paths):
+    """
+    Adds a predetermined resolution fit for the given arm if it doesn't already exist.
+
+    Parameters:
+    - arm (str): The spectrograph arm ('blue', 'green', or 'red').
+    - date (str): The date of the observations.
+    - veloce_paths (object): An object containing paths to the data directories.
+    """
+    resolution_fit_filename = f"arcTh_resolution_{arm}_{date}.fits"
+
+    if os.path.exists(os.path.join(veloce_paths.wavelength_calibration_dir, resolution_fit_filename)):
+        print(f"There is an existing resolution fit: {resolution_fit_filename}")
+        return os.path.join(veloce_paths.wavelength_calibration_dir, resolution_fit_filename)
+    elif not os.path.exists(os.path.join(veloce_paths.wavelength_calibration_dir, f"arcTh_resolution_{arm}_230828.fits")):
+        # copy static resolution fit
+        wave, resolution, hdr = veloce_reduction_tools.load_extracted_spectrum_fits(
+        os.path.join(veloce_paths.wave_dir, f"arcTh_resolution_{arm}_230828.fits"))
+        print(f"Copying predetermined resolution fit: arcTh_resolution_{arm}_230828.fits")
+        veloce_reduction_tools.save_extracted_spectrum_fits(
+            os.path.join(veloce_paths.wavelength_calibration_dir, f"arcTh_resolution_{arm}_230828.fits"),
+            wave,
+            resolution,
+            hdr)
+        return os.path.join(veloce_paths.wavelength_calibration_dir, f"arcTh_resolution_{arm}_230828.fits")
+    else:
+        return os.path.join(veloce_paths.wavelength_calibration_dir, f"arcTh_resolution_{arm}_230828.fits")

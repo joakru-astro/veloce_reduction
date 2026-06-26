@@ -1,6 +1,5 @@
 import os
 import yaml
-
 from astropy.io import fits
 import os, re
 
@@ -9,19 +8,22 @@ from datetime import datetime
 data_dirs = {'red': 'ccd_3', 'green': 'ccd_2', 'blue': 'ccd_1'}
 
 class VelocePaths:
+    """
+    Class to manage directory paths for Veloce data reduction.
+    """
     def __init__(self, input_dir=None, output_dir=None):
         # self.reduction_parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.reduction_parent_dir = os.path.dirname(os.path.abspath(__file__))
         
         if input_dir is not None:
-            input_dir = os.path.abspath(input_dir)
+            input_dir = os.path.abspath(os.path.expanduser(input_dir))
             if not os.path.exists(input_dir):
                 raise FileNotFoundError(f"Input path does not exist: {input_dir}")
             else:
                 self.input_dir = input_dir
 
         if output_dir is not None:
-            output_dir = os.path.abspath(output_dir)
+            output_dir = os.path.abspath(os.path.expanduser(output_dir))
             if not os.path.exists(output_dir):
                 # raise FileNotFoundError(f'Output path does not exist: {output_dir}')
                 os.makedirs(output_dir)
@@ -33,9 +35,18 @@ class VelocePaths:
         self.trace_dir = os.path.join(self.reduction_parent_dir, 'Trace')
         
         if output_dir is not None:
+            self.extracted_spectra_dir = os.path.join(self.output_dir, 'Extracted_spectra')
+            if not os.path.exists(self.extracted_spectra_dir):
+                os.makedirs(self.extracted_spectra_dir)
+            self.merged_spectra_dir = os.path.join(self.output_dir, 'Merged_spectra')
+            if not os.path.exists(self.merged_spectra_dir):
+                os.makedirs(self.merged_spectra_dir)
             self.intermediate_dir = os.path.join(self.output_dir, 'Intermediate_results')
             if not os.path.exists(self.intermediate_dir):
                 os.makedirs(self.intermediate_dir)
+            self.blaze_dir = os.path.join(self.intermediate_dir, 'Blaze')
+            if not os.path.exists(self.blaze_dir):
+                os.makedirs(self.blaze_dir)
             self.master_dir = os.path.join(self.intermediate_dir, 'Master')
             if not os.path.exists(self.master_dir):
                 os.makedirs(self.master_dir)
@@ -51,46 +62,100 @@ class VelocePaths:
 
     @classmethod
     def from_config(cls, config):
+        """ 
+        Create a VelocePaths instance from a configuration dictionary.
         
+        Parameters:
+        - config (dict): A dictionary containing the configuration options, including input_dir and output_dir
+        
+        Returns:
+        - VelocePaths: An instance of the VelocePaths class with paths set according to the configuration.
+        """
         paths = cls(config['input_dir'], config['output_dir'])
 
         if config['wave_dir'] != 'Default':
-            paths.wave_dir = os.path.abspath(config['wave_dir'])
+            paths.wave_dir = os.path.abspath(os.path.expanduser(config['wave_dir']))
         if config['trace_dir'] != 'Default':
-            paths.trace_dir = os.path.abspath(config['trace_dir'])
+            paths.trace_dir = os.path.abspath(os.path.expanduser(config['trace_dir']))
 
-        nondefault_dirs = True
+        nondefault_dirs = True # flag to check if all dirs for intermediate results are non default, if so we can skip creating intermediate dir
+        if config['blaze_dir'] != 'Default':
+            paths.blaze_dir = os.path.abspath(os.path.expanduser(config['blaze_dir']))
+            if not os.listdir(os.path.join(paths.intermediate_dir, 'Blaze')): # remove intermediate dir if empty
+                os.rmdir(os.path.join(paths.intermediate_dir, 'Blaze'))
+            else:
+                print(f"Warning: Default blaze directory {os.path.join(paths.intermediate_dir, 'Blaze')} is not empty.")
+            if not os.path.exists(paths.blaze_dir):
+                os.makedirs(paths.blaze_dir)
+        else:
+            nondefault_dirs = False
         if config['master_dir'] != 'Default':
-            os.rmdir(os.path.join(paths.intermediate_dir, 'Master'))
-            paths.master_dir = os.path.abspath(config['master_dir'])
+            if not os.listdir(os.path.join(paths.intermediate_dir, 'Master')): # remove intermediate dir if empty
+                os.rmdir(os.path.join(paths.intermediate_dir, 'Master'))
+            else:
+                print(f"Warning: Default master directory {os.path.join(paths.intermediate_dir, 'Master')} is not empty.")
+            paths.master_dir = os.path.abspath(os.path.expanduser(config['master_dir']))
             if not os.path.exists(paths.master_dir):
                 os.makedirs(paths.master_dir)
         else:
             nondefault_dirs = False
         if config['wavelength_calibration_dir'] != 'Default':
-            os.rmdir(os.path.join(paths.intermediate_dir, 'Wavelength_calibration'))
-            paths.wavelength_calibration_dir = os.path.abspath(config['wavelength_calibration_dir'])
+            if not os.listdir(os.path.join(paths.intermediate_dir, 'Wavelength_calibration')): # remove intermediate dir if empty
+                os.rmdir(os.path.join(paths.intermediate_dir, 'Wavelength_calibration'))
+            else:
+                print(f"Warning: Default wavelength calibration directory {os.path.join(paths.intermediate_dir, 'Wavelength_calibration')} is not empty.")
+            paths.wavelength_calibration_dir = os.path.abspath(os.path.expanduser(config['wavelength_calibration_dir']))
             if not os.path.exists(paths.wavelength_calibration_dir):
                 os.makedirs(paths.wavelength_calibration_dir)
         else:
             nondefault_dirs = False
         if config['trace_shift_dir'] != 'Default':
-            os.rmdir(os.path.join(paths.intermediate_dir, 'Trace_shifts'))
-            paths.trace_shift_dir = os.path.abspath(config['trace_shift_dir'])
+            if not os.listdir(os.path.join(paths.intermediate_dir, 'Trace_shifts')): # remove intermediate dir if empty
+                os.rmdir(os.path.join(paths.intermediate_dir, 'Trace_shifts'))
+            else:
+                print(f"Warning: Default trace shift directory {os.path.join(paths.intermediate_dir, 'Trace_shifts')} is not empty.")
+            paths.trace_shift_dir = os.path.abspath(os.path.expanduser(config['trace_shift_dir']))
             if not os.path.exists(paths.trace_shift_dir):
                 os.makedirs(paths.trace_shift_dir)
         else:
             nondefault_dirs = False
         if config['plot_dir'] != 'Default':
-            os.rmdir(os.path.join(paths.intermediate_dir, 'Plots'))
-            paths.plot_dir = os.path.abspath(config['plot_dir'])
+            if not os.listdir(os.path.join(paths.intermediate_dir, 'Plots')): # remove intermediate dir if empty
+                os.rmdir(os.path.join(paths.intermediate_dir, 'Plots'))
+            else:
+                print(f"Warning: Default plot directory {os.path.join(paths.intermediate_dir, 'Plots')} is not empty.")
+            paths.plot_dir = os.path.abspath(os.path.expanduser(config['plot_dir']))
             if not os.path.exists(paths.plot_dir):
                 os.makedirs(paths.plot_dir)
         else:
             nondefault_dirs = False
+
         if nondefault_dirs:
             # os.rmdir(paths.intermediate_dir)
+            os.rmdir(os.path.join(paths.output_dir, 'Intermediate_results'))
             paths.intermediate_dir = None
+
+        if config['extracted_spectra_dir'] != 'Default':
+            if not os.listdir(os.path.join(paths.output_dir, 'Extracted_spectra')): # remove directory if empty
+                os.rmdir(os.path.join(paths.output_dir, 'Extracted_spectra'))
+            else:
+                print(f"Warning: Default extracted spectra directory {os.path.join(paths.output_dir, 'Extracted_spectra')} is not empty.")
+            paths.extracted_spectra_dir = os.path.abspath(os.path.expanduser(config['extracted_spectra_dir']))
+            if not os.path.exists(paths.extracted_spectra_dir):
+                os.makedirs(paths.extracted_spectra_dir)
+        if config['merged_spectra_dir'] != 'Default':
+            if not os.listdir(os.path.join(paths.output_dir, 'Merged_spectra')): # remove directory if empty
+                os.rmdir(os.path.join(paths.output_dir, 'Merged_spectra'))
+            else:
+                print(f"Warning: Default merged spectra directory {os.path.join(paths.output_dir, 'Merged_spectra')} is not empty.")
+            paths.merged_spectra_dir = os.path.abspath(os.path.expanduser(config['merged_spectra_dir']))
+            if not os.path.exists(paths.merged_spectra_dir):
+                os.makedirs(paths.merged_spectra_dir)
+        elif not config['merge_orders']:
+            if not os.listdir(os.path.join(paths.output_dir, 'Merged_spectra')): # remove directory if not merging and empty
+                os.rmdir(os.path.join(paths.output_dir, 'Merged_spectra'))
+            else:
+                print(f"Warning: Default merged spectra directory {os.path.join(paths.output_dir, 'Merged_spectra')} is not empty.")
 
         return paths
     
@@ -103,6 +168,7 @@ class VelocePaths:
         message += f'Extracted data directory: {self.output_dir}\n'
         message += f'Wave directory: {self.wave_dir}\n'
         message += f'Trace directory: {self.trace_dir}\n'
+        message += f'Blaze directory: {self.blaze_dir}\n'
         return message
     # remove methods below if not needed
     # def __eq__(self, other):
@@ -154,14 +220,28 @@ def validate_config(config):
     # validate options set in config file
     if config['reduce'] not in ['run', 'night', 'file']:
         raise ValueError(f'reduce must be "run", "night" or "file", not {config["reduce"]}')
-    if config['calib_type'] not in ['SimLC', 'SimThXe', 'Interpolate', 'Static', 'arcTh']:
-        raise ValueError(f'calib_type must be "SimLC", "SimThXe", "Interpolate", "arcTh or "Static", not {config["calib_type"]}')
+    if config['calib_type'] not in ['SimLC', 'buildLC', 'SimThXe', 'Interpolate', 'Static', 'arcTh']:
+        raise ValueError(f'calib_type must be "SimLC", "buildLC", "SimThXe", "Interpolate", "arcTh or "Static", not {config["calib_type"]}')
+    # secondary options
+    if not isinstance(config['use_log'], bool):
+        raise ValueError(f'use_log must be True or False, not {config["use_log"]}')
     if config['arm'] not in ['all', 'red', 'green', 'blue']:
         raise ValueError(f'arm must be "all", "red", "green" or "blue", not {config["arm"]}')
     if config['amplifier_mode'] not in [2, 4]:
         raise ValueError(f'amplifier_mode must be 2 or 4, not {config["amplifier_mode"]}')
+    if not isinstance(config['validate_trace'], bool):
+        raise ValueError(f'validate_trace must be True or False, not {config["validate_trace"]}')
     if not isinstance(config['plot_diagnostic'], bool):
         raise ValueError(f'plot_diagnostic must be True or False, not {config["plot_diagnostic"]}')
+    if not isinstance(config['scattered_light'], bool):
+        raise ValueError(f'scattered_light must be True or False, not {config["scattered_light"]}')
+    if not isinstance(config['flat_field'], bool):
+        raise ValueError(f'flat_field must be True or False, not {config["flat_field"]}')
+    if not isinstance(config['estimate_resolution'], bool):
+        raise ValueError(f'estimate_resolution must be True or False, not {config["estimate_resolution"]}')
+    if not isinstance(config['merge_orders'], bool):
+        raise ValueError(f'merge_orders must be True or False, not {config["merge_orders"]}')
+
     # validate targets list
     if config['science_targets'] == 'Default':
         pass
@@ -176,33 +256,78 @@ def validate_config(config):
     else:
         pass
         # raise ValueError('science_targets must be "Default", a list of target names, or a valid path to a target list file.')
+    
     # validate input paths
-    if not os.path.exists(os.path.abspath(config['input_dir'])):
-        raise FileNotFoundError(f'{os.path.abspath(config["input_dir"])} does not exist.')
-    if config['reduce'] == 'night' and not os.path.exists(os.path.abspath(os.path.join(config['input_dir'], config['date']))):
-        raise FileNotFoundError(f'{config["date"]} does not exist in {os.path.abspath(config["input_dir"])}')
+    if not os.path.exists(os.path.abspath(os.path.expanduser(config['input_dir']))):
+        raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["input_dir"]))} does not exist.')
+    if config['reduce'] == 'night' and not os.path.exists(os.path.abspath(os.path.join(os.path.expanduser(config['input_dir']), config['date']))):
+        raise FileNotFoundError(f'{config["date"]} does not exist in {os.path.abspath(os.path.expanduser(config["input_dir"]))}')
     # if not os.path.exists(os.path.abspath(config['output_dir'])):
     #     raise FileNotFoundError(f'{os.path.abspath(config["output_dir"])} does not exist.')
     # validate internal paths
-    if config['wave_dir'] != 'Default' and not os.path.exists(os.path.abspath(config['wave_dir'])):
-        raise FileNotFoundError(f'{os.path.abspath(config["wave_dir"])} does not exist.')
-    if config['trace_dir'] != 'Default' and not os.path.exists(os.path.abspath(config['trace_dir'])):
-        raise FileNotFoundError(f'{os.path.abspath(config["trace_dir"])} does not exist.')
-    
+    if config['wave_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['wave_dir']))):
+        raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["wave_dir"]))} does not exist.')
+    if config['trace_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['trace_dir']))):
+        raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["trace_dir"]))} does not exist.')
+    # if config['blaze_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['blaze_dir']))):
+    #     raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["blaze_dir"]))} does not exist.')
+    # if config['master_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['master_dir']))):
+    #     raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["master_dir"]))} does not exist.')
+    # if config['wavelength_calibration_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['wavelength_calibration_dir']))):
+    #     raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["wavelength_calibration_dir"]))} does not exist.')
+    # if config['trace_shift_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['trace_shift_dir']))):
+    #     raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["trace_shift_dir"]))} does not exist.')
+    # if config['extracted_spectra_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['extracted_spectra_dir']))):
+    #     raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["extracted_spectra_dir"]))} does not exist.')
+    # if config['merged_spectra_dir'] != 'Default' and not os.path.exists(os.path.abspath(os.path.expanduser(config['merged_spectra_dir']))):
+    #     raise FileNotFoundError(f'{os.path.abspath(os.path.expanduser(config["merged_spectra_dir"]))} does not exist.')
+
     return True
 
 def make_config(input_dir, output_dir,
                 wave_dir='Default', trace_dir='Default',
-                master_dir='Default', wavelength_calibration_dir='Default',
+                blaze_dir='Default', master_dir='Default', wavelength_calibration_dir='Default',
                 trace_shift_dir='Default', plot_dir='Default',
+                extracted_spectra_dir='Default', merged_spectra_dir='Default',
                 trace_file='Default',
                 reduce='run', date=None, filename=None,
                 calib_type='arcTh', science_targets='Default',
                 arm='all', amplifier_mode=4,
                 use_log=False, plot_diagnostic=False,
-                validate_trace=True, sim_calib=True,
-                scattered_light=False, flat_field=False):
+                validate_trace=True,
+                scattered_light=False, flat_field=False, estimate_resolution=False, merge_orders=False):
+    """
+    Create a configuration dictionary for Veloce data reduction.
+    
+    Parameters:
+    - input_dir (str): Path to the input directory containing raw data.
+    - output_dir (str): Path to the output directory where reduced data will be saved.
+    - wave_dir (str, optional): Path to the directory containing wavelength calibration files. Default is 'Default', which uses the internal directory.
+    - trace_dir (str, optional): Path to the directory containing trace files. Default is 'Default', which uses the internal directory.
+    - blaze_dir (str, optional): Path to the directory for blaze models. Default is 'Default', which uses the internal directory.
+    - master_dir (str, optional): Path to the directory for master calibration files. Default is 'Default', which uses the internal directory.
+    - wavelength_calibration_dir (str, optional): Path to the directory for wavelength calibration results. Default is 'Default', which uses the internal directory.
+    - trace_shift_dir (str  optional): Path to the directory for trace shift results. Default is 'Default', which uses the internal directory.
+    - plot_dir (str, optional): Path to the directory for diagnostic plots. Default is 'Default', which uses the internal directory.
+    - trace_file (str, optional): Path to a specific trace file to use. Default is 'Default', which uses the internal directory.
+    - reduce (str): The reduction mode, which can be 'run', 'night', or 'file'. This determines the scope of the reduction.
+    - date (str, optional): The date of the observations to reduce, in 'YYYYMMDD' format. Required if reduce is 'night'.
+    - filename (str, optional): The filename of the observation to reduce. Required if reduce is 'file'.
+    - calib_type (str): The type of wavelength calibration to perform, which can be 'SimLC', 'SimThXe', 'Interpolate', 'Static', or 'arcTh'.
+    - science_targets (list or str): A list of science target names to filter by, or a path to a file containing the target names. If 'Default', all science targets will be included.
+    - arm (str): The spectrograph arm to reduce, which can be 'all', 'red', 'green', or 'blue'.
+    - amplifier_mode (int): The amplifier mode used during the observations, which can be 2 or 4.
+    - use_log (bool): Whether to use observation logs to determine which files to reduce. If False, the input directory will be scanned directly.
+    - plot_diagnostic (bool): Whether to generate diagnostic plots during the reduction process.
+    - validate_trace (bool): Whether to validate the trace before extraction.
+    - scattered_light (bool): Whether to perform scattered light correction.
+    - flat_field (bool): Whether to perform flat field correction.
+    - estimate_resolution (bool): Whether to estimate the spectral resolution during wavelength calibration.
+    - merge_orders (bool): Whether to merge the deblazed orders into a single spectrum.
 
+    Returns:
+    - config (dict): A dictionary containing the configuration options for Veloce data reduction.
+    """
     config = {
         'input_dir': input_dir,
         'output_dir': output_dir,
@@ -216,14 +341,18 @@ def make_config(input_dir, output_dir,
         'use_log': use_log,
         'plot_diagnostic': plot_diagnostic,
         'validate_trace': validate_trace,
-        'sim_calib': sim_calib,
         'scattered_light': scattered_light,
         'flat_field': flat_field,
+        'estimate_resolution': estimate_resolution,
+        'merge_orders': merge_orders,
         'wave_dir': wave_dir,
         'trace_dir': trace_dir,
+        'blaze_dir': blaze_dir,
         'master_dir': master_dir,
         'wavelength_calibration_dir': wavelength_calibration_dir,
         'trace_shift_dir': trace_shift_dir,
+        'extracted_spectra_dir': extracted_spectra_dir,
+        'merged_spectra_dir': merged_spectra_dir,
         'plot_dir': plot_dir,
         'trace_file': trace_file
     }
@@ -233,6 +362,14 @@ def make_config(input_dir, output_dir,
         raise ValueError('Invalid configuration')
 
 def save_config(config, veloce_paths, config_filename='config.yaml'):
+    """
+    Save configuration dictionary to a YAML file in the output directory.
+
+    Parameters:
+    - config (dict): The configuration dictionary to save.
+    - veloce_paths (VelocePaths): objects with paths used in reduction.
+    - config_filename (str, optional): The name of the configuration file to save. Default is 'config.yaml'.
+    """
     if not os.path.exists(veloce_paths.output_dir):
         os.makedirs(veloce_paths.output_dir)
     config_file = os.path.join(veloce_paths.output_dir, config_filename)
@@ -243,6 +380,16 @@ def save_config(config, veloce_paths, config_filename='config.yaml'):
     return config_file
 
 def format_date(date_str):
+    """
+    format date string
+
+    Parameters:
+    - date_str (str): Date string in 'YYMMDD' format.
+
+    Returns:
+    - formatted_date (str): Date string in 'ddmmm' format (%d%b),
+    where 'dd' is the day and 'mmm' is the three-letter month abbreviation in lowercase.
+    """
     # Parse the date string using datetime.strptime
     date_obj = datetime.strptime(date_str, '%y%m%d')
     
@@ -252,6 +399,17 @@ def format_date(date_str):
     return formatted_date
 
 def load_run_logs(science_targets, veloce_paths, config):
+    """
+    Load observation logs for a run and categorize files based on their type and selected arm.
+    
+    Parameters:
+    - science_targets (list of str): A list of science target names to filter the science observations.
+    - veloce_paths (VelocePaths): An instance of the VelocePaths class containing directory paths.
+    - config (dict): The configuration dictionary containing options for the reduction.
+    
+    Returns:
+    - obs_list (dict): A dictionary with keys representing different observation types.
+    """
     # Define the regular expression pattern for YYMMDD format
     date_pattern = re.compile(r'^\d{6}$')
 
@@ -283,6 +441,17 @@ def load_run_logs(science_targets, veloce_paths, config):
     return obs_list
 
 def load_night_logs(science_targets, veloce_paths, config):
+    """
+    Load observation logs for a night and categorize files based on their type and selected arm.
+    
+    Parameters:
+    - science_targets (list of str): A list of science target names to filter the science observations.
+    - veloce_paths (VelocePaths): An instance of the VelocePaths class containing directory paths.
+    - config (dict): The configuration dictionary containing options for the reduction.
+    
+    Returns:
+    - obs_list (dict): A dictionary with keys representing different observation types.
+    """
     day = format_date(config['date'])
 
     obs_list = {'flat_red': {}, 'flat_green': {}, 'flat_blue': {}, 'flat_blue_long': {},
@@ -318,9 +487,10 @@ def load_log_info(log_path, science_targets, selected_arm, day):
     - day (str): The day identifier to construct the file names.
     - calib_type (str): The calibration type to filter the wave calibration observations.
 
-    Returns:
-    - dict: A dictionary with keys representing different observation types ('flat_red', 'flat_green', 'flat_blue',
-      'dark', 'bias', 'science', 'wave_calib') and values being lists of file names or tuples of target names and file names.
+Returns:
+    - obs_list (dict): A dictionary with keys representing different observation types and values being lists
+        of file names or tuples of target names and file names.
+    - science_targets (list): A list of science target names found in the directory, filtered by the input list if provided.
 
     Note:
     - The function assumes a specific format for the observation log file.
@@ -384,6 +554,11 @@ def scan_directory(veloce_paths, date, selected_arm, science_targets=[None]):
     - date (str): Date string in 'YYYYMMDD' format pointing to date to be scanned.
     - selected_arm (str): The spectrograph arm to be processed. Valid values are 'red', 'green', 'blue', and 'all'.
     - science_targets (list or None): List of science target names to filter by. If None, include all science targets.
+    
+    Returns:
+    - obs_list (dict): A dictionary with keys representing different observation types and values being lists
+        of file names or tuples of target names and file names.
+    - science_targets (list): A list of science target names found in the directory, filtered by the input list if provided.
     """
     ### TODO: validate data quality
     obs_list = {'flat_red': [], 'flat_green': [], 'flat_blue': [], 'flat_blue_long': [],

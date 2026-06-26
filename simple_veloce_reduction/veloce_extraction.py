@@ -5,113 +5,10 @@ import numpy as np
 from . import veloce_reduction_tools
 from . import veloce_wavecalib
 from . import veloce_diagnostic
+from . import veloce_normalise
 
 data_dirs = {'red': 'ccd_3', 'green': 'ccd_2', 'blue': 'ccd_1'}
 arm_nums = {'red': 3, 'green': 2, 'blue': 1}
-
-# class ExtractedSpectrum():
-#     def __init__(self, wave, flux, hdr):
-#         self.wave = wave
-#         self.flux = flux
-#         self.header = hdr
-
-#     def save(self, filename):
-#         np.savez(filename, wave=self.wave, flux=self.flux, hdr=self.header)
-
-def load_trace_data(arm, trace_path, sim_calib=False, filename=None):
-    if filename == 'Default':
-        if sim_calib:
-            filename = os.path.join(trace_path, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
-        else:
-            filename = os.path.join(trace_path, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
-    else:
-        if arm.lower() not in filename.lower():
-            # only checks the filename at this stage
-            raise ValueError(f"Trace data filename '{filename}' does not match selected arm '{arm}'.")
-        if not os.path.abspath(filename):
-            # if not absolute path, assume it is relative to trace_path
-            # filename = os.path.join(trace_path, filename)
-            filename = os.path.join(trace_path, filename)
-    traces = veloce_reduction_tools.Traces.load_traces(filename)
-    return traces
-
-def get_trace_shift(traces, veloce_paths, arm, amplifier_mode, sim_calib, obs_list):
-    date = list(obs_list['science'].keys())[0] # date of first science observation
-    trace_shift_filename =  os.path.join(veloce_paths.trace_shift_dir, f'trace_{arm}_{date}.pkl')
-    if os.path.exists(trace_shift_filename):
-        print(f'[Info]: Loading existing traces with determined shift {trace_shift_filename}')
-        traces = veloce_reduction_tools.Traces.load_traces(trace_shift_filename)
-    else:
-        master_flat_filename = os.path.join(veloce_paths.master_dir, f'master_flat_{arm}_{date}.fits')
-        if os.path.exists(master_flat_filename):
-            with fits.open(master_flat_filename) as hdul:
-                master_flat = hdul[0].data
-                hdr = hdul[0].header
-        else:
-            file_list = obs_list[f'flat_{arm}'][date]
-            file_list = veloce_reduction_tools.get_longest_consecutive_files(file_list)
-            master_flat, hdr = veloce_reduction_tools.get_master_mmap(
-                file_list, f"flat_{arm}", veloce_paths.input_dir,
-                date, arm, amplifier_mode)
-            veloce_reduction_tools.save_image_fits(master_flat_filename, master_flat, hdr)
-    
-        shift, pix_shift, ccf = traces.determine_trace_shift_template(master_flat, arm=arm)
-        if np.isnan(shift):
-            print('[Warning]: Could not determine trace shift, not adjusting traces.')
-        elif shift == 0:
-            print('[Info]: No trace shift detected, not adjusting traces.')
-            traces.save_traces(filename=f'trace_{arm}_{date}.pkl', trace_dir=veloce_paths.trace_shift_dir, arm=arm, sim_calib=sim_calib)
-        else:
-            print(f'[Info]: Adjusting traces by {shift} pixels.')
-            traces.x = [np.array(x) + shift for x in traces.x]
-            traces.traces = [np.array([y, x]) for y, x in zip(traces.y, traces.x)]
-            traces.save_traces(filename=f'trace_{arm}_{date}.pkl', trace_dir=veloce_paths.trace_shift_dir, arm=arm, sim_calib=sim_calib)
-        
-    return traces
-
-def remove_scattered_light(frame, hdr, traces, diagnostic=False):
-    """
-    Remove scattered light from the image.
-    """
-    background_threshold = 20
-    # this models scattered light and subtracts it
-    background = veloce_reduction_tools.fit_background(frame, traces)
-    # head = f'scattered light corrected\n---\nBackground statistics:\n---'
-    # median_str = f'median = {np.median(background)}'
-    # max_str = f'max = {np.max(background)}'
-    # std_str = f'stdev = {np.std(background)}'
-    # print('\n'.join([head, median_str, max_str, std_str]))
-    corrected_frame = frame.copy()
-    corrected_frame -= background
-    corrected_frame[corrected_frame < 0] = 0
-    
-    if diagnostic:
-        veloce_diagnostic.plotted_scattered_light(frame, background, corrected_frame, traces)
-    
-    ### TODO: add note to reduction log
-    hdr['HISTORY'] = 'Scattered light corrected'
-    if np.max(background) < background_threshold:
-        print(f'[Warning] Scattered light correction: background level is below {background_threshold} ADU')
-
-    return corrected_frame, hdr
-
-def get_flat(veloce_paths, arm, amplifier_mode, date, obs_list):
-    master_flat_filename = os.path.join(veloce_paths.master_dir, f'master_flat_{arm}_{date}.fits')
-    if os.path.exists(master_flat_filename):
-        with fits.open(master_flat_filename) as hdul:
-            master_flat = hdul[0].data
-            hdr = hdul[0].header
-        norm_flat, hdr = veloce_reduction_tools.normalise_flat(master_flat, hdr)
-    else:
-        file_list = obs_list[f'flat_{arm}'][date]
-        file_list = veloce_reduction_tools.get_longest_consecutive_files(file_list)
-        master_flat, hdr = veloce_reduction_tools.get_master_mmap(
-            file_list, f"flat_{arm}", veloce_paths.input_dir,
-            date, arm, amplifier_mode)
-        norm_flat, hdr = veloce_reduction_tools.normalise_flat(master_flat, hdr)
-        veloce_reduction_tools.save_image_fits(master_flat_filename, master_flat, hdr)
-
-    return master_flat, norm_flat
 
 def extract_run(target_list, config, veloce_paths, obs_list):
     """
@@ -141,10 +38,13 @@ def extract_run(target_list, config, veloce_paths, obs_list):
     saved to files (used in further processing).
     """
     # pick which arm to reduce
-    if config['arm'] in data_dirs.keys():
+    if config['arm'] == 'all':
+        if 'LC' in config['calib_type']:
+            arms = ['red', 'green'] # LC calibration not supported for blue arm
+        else:
+            arms = list(data_dirs.keys())
+    elif config['arm'] in data_dirs.keys():
         arms = [config['arm']]
-    elif config['arm'] == 'all':
-        arms = data_dirs.keys()
     else:
         raise ValueError('Unsupported arm')
     
@@ -152,34 +52,44 @@ def extract_run(target_list, config, veloce_paths, obs_list):
         print(arm)
         ccd = data_dirs[arm]
         ### load traces
-        traces = load_trace_data(arm, veloce_paths.trace_dir, sim_calib=config['sim_calib'], filename=config['trace_file'])
+        traces = veloce_reduction_tools.load_trace_data(arm, veloce_paths.trace_dir, filename=config['trace_file'])
         if config['validate_trace']:
-            traces = get_trace_shift(traces, veloce_paths,
-                                 arm, config['amplifier_mode'], config['sim_calib'],
-                                 obs_list)
+            traces = veloce_reduction_tools.get_trace_shift(traces, veloce_paths, arm, config['amplifier_mode'], obs_list)
         
         if config['calib_type'] == 'Static':
             ### load static wave calibration based on ThAr
-            ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
-                veloce_reduction_tools.load_prefitted_wave(
-                    arm=arm, wave_calib_slice=traces.wave_calib_slice, wave_path=veloce_paths.wave_dir)
-            static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
+            # ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
+            #     veloce_reduction_tools.load_prefitted_wave(
+            #         arm=arm, wave_calib_slice=traces.wave_calib_slice, wave_path=veloce_paths.wave_dir)
+            # static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
+            static_wave, ref_arcTh, _ = veloce_reduction_tools.load_extracted_spectrum_fits(
+                os.path.join(veloce_paths.wave_dir, f"arcTh_wave_{arm}_230828.fits"))
+            veloce_wavecalib.add_predetermined_resolution(arm, date, veloce_paths)
+        elif config['calib_type'] == 'SimLC':
+            veloce_wavecalib.add_predetermined_resolution(arm, date, veloce_paths)
         # elif config['calib_type'] == 'Interpolate':
         #     wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation(target_list, obs_list, veloce_paths)
-        else:
-            pass # load LC?
 
         for date in target_list.keys(): 
             if config['flat_field']:
-                flat, norm_flat = get_flat(veloce_paths, arm, config['amplifier_mode'], date, obs_list)
+                flat, norm_flat = veloce_reduction_tools.get_flat(veloce_paths, arm, config['amplifier_mode'], date, obs_list)
             # traces.adjust_traces_with_ccf(flat, arm)
 
             if config['calib_type'] == 'arcTh':
                 arcTh_wave = veloce_wavecalib.calibrate_absolute_Th(traces, veloce_paths, obs_list,
                                                    date, arm, config['amplifier_mode'],
+                                                   estimate_resolution=config['estimate_resolution'],
                                                    plot=config['plot_diagnostic'], plot_filename=f'arcTh_wavecalib_{arm}_{date}',
                                                    th_linelist_filename='Default')
-                
+            elif config['calib_type'] == 'buildLC':
+                if arm == 'blue':
+                    print('[Warning] LC calibration not supported for blue arm')
+                    continue
+                vacuum_wave, calibrated_pixels_per_order = veloce_wavecalib.build_LC_wavelength_solution(
+                    traces, veloce_paths, date,
+                    arm, config['amplifier_mode'], obs_list,
+                    estimate_resolution=config['estimate_resolution'], plot=config['plot_diagnostic'], filename=None)
+                          
             for obs in target_list[date]:
                 target, filename = obs
                 if int(filename[5]) == arm_nums[arm]:
@@ -196,14 +106,15 @@ def extract_run(target_list, config, veloce_paths, obs_list):
                             image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, norm_flat, hdr)
                         
                         if config['scattered_light']:
-                            image_subtracted_bias, hdr = remove_scattered_light(image_subtracted_bias, hdr, traces)
+                            image_subtracted_bias, hdr, background = veloce_reduction_tools.remove_scattered_light(image_subtracted_bias, hdr, traces)
                         
-                        extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
+                        extracted_science_orders, extracted_uncertainties_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
                             image_subtracted_bias, traces, remove_background=False)
                         
                         if config['calib_type'] == 'Static':
-                            vacuum_wave = static_wave
+                            final_wave = static_wave
                             final_flux = extracted_science_orders
+                            final_uncertainty = extracted_uncertainties_orders
                         # elif config['calib_type'] == 'Interpolate':
                         #     vacuum_wave, final_flux = veloce_wavecalib.interpolate_wave(
                         #         extracted_science_orders, hdr)
@@ -212,14 +123,16 @@ def extract_run(target_list, config, veloce_paths, obs_list):
                         #         extracted_science_orders, hdr)
                         #     final_flux = extracted_science_orders
                         elif config['calib_type'] == 'SimLC':
-                            vacuum_wave, final_flux = veloce_wavecalib.calibrate_simLC(
+                            vacuum_wave, final_flux, final_uncertainty = veloce_wavecalib.calibrate_simLC(
                                 extracted_science_orders, veloce_paths, image_subtracted_bias,
-                                hdr, arm, plot=config['plot_diagnostic'], filename=filename)
-                        
-                        if config['calib_type'] == 'SimLC' or config['calib_type'] == 'Static':
+                                hdr, arm, plot=config['plot_diagnostic'], filename=filename, flux_error=extracted_uncertainties_orders)
                             final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
+                        elif config['calib_type'] == 'buildLC':
+                            final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
+                            final_flux = [flux[calibrated_pixels] for flux, calibrated_pixels in zip(extracted_science_orders, calibrated_pixels_per_order) if np.any(calibrated_pixels)]
+                            final_uncertainty = [err[calibrated_pixels] for err, calibrated_pixels in zip(extracted_uncertainties_orders, calibrated_pixels_per_order) if np.any(calibrated_pixels)]
                         elif config['calib_type'] == 'arcTh':
-                            final_wave, final_flux = arcTh_wave, extracted_science_orders
+                            final_wave, final_flux, final_uncertainty = arcTh_wave, extracted_science_orders, extracted_uncertainties_orders
                         else:
                             # TODO: change to best available(?), same for if missing files/good data
                             raise ValueError('Unsupported calib_type')
@@ -236,11 +149,15 @@ def extract_run(target_list, config, veloce_paths, obs_list):
                                 veloce_diagnostic.plot_extracted_2D_order(
                                     extracted_order_imgs, order=10, traces=traces, filename=filename,
                                     veloce_paths=veloce_paths)
+                            if config['scattered_light']:
+                                veloce_diagnostic.plotted_scattered_light(image_subtracted_bias+background, background, image_subtracted_bias, traces, filename=filename, veloce_paths=veloce_paths)
 
                         # save extracted spectrum as fits file
-                        fits_filename = os.path.join(veloce_paths.output_dir, f"{target}_veloce_{arm}_{filename}")
+                        fits_filename = os.path.join(veloce_paths.extracted_spectra_dir, f"{target}_veloce_{arm}_{filename}")
                         veloce_reduction_tools.save_extracted_spectrum_fits(
-                            filename=fits_filename, wave=final_wave, flux=final_flux, hdr=hdr)
+                            filename=fits_filename, wave=final_wave, flux=final_flux, hdr=hdr, err=final_uncertainty)
+    if config['merge_orders']:
+        veloce_normalise.merge_veloce_orders(veloce_paths, target_list, arms, config, obs_list, single_file=False, skip_edge_orders=True)
 
 def extract_night(target_list, config, veloce_paths, obs_list):
     """
@@ -269,45 +186,56 @@ def extract_night(target_list, config, veloce_paths, obs_list):
     None. The function is designed to perform data extraction and processing, with outputs
     saved to files (used in further processing).
     """
-        # pick which arm to reduce
-    if config['arm'] in data_dirs.keys():
+    # pick which arm to reduce
+    if config['arm'] == 'all':
+        if 'LC' in config['calib_type']:
+            arms = ['red', 'green'] # LC calibration not supported for blue arm
+        else:
+            arms = list(data_dirs.keys())
+    elif config['arm'] in data_dirs.keys():
         arms = [config['arm']]
-    elif config['arm'] == 'all':
-        arms = data_dirs.keys()
     else:
         raise ValueError('Unsupported arm')
     
     for arm in arms:
-        print(arm)
+        print(f"Processing arm: {arm}")
         date = config['date']
         ccd = data_dirs[arm]
         ### load traces
-        traces = load_trace_data(arm, veloce_paths.trace_dir, sim_calib=config['sim_calib'], filename=config['trace_file'])
+        traces = veloce_reduction_tools.load_trace_data(arm, veloce_paths.trace_dir, filename=config['trace_file'])
         if config['validate_trace']:
-            traces = get_trace_shift(traces, veloce_paths,
-                                 arm, config['amplifier_mode'], config['sim_calib'],
-                                 obs_list)
+            traces = veloce_reduction_tools.get_trace_shift(traces, veloce_paths, arm, config['amplifier_mode'], obs_list)
         
         if config['flat_field']:
-            flat, norm_flat = get_flat(veloce_paths, arm, config['amplifier_mode'], date, obs_list)
+            flat, norm_flat = veloce_reduction_tools.get_flat(veloce_paths, arm, config['amplifier_mode'], date, obs_list)
         # traces.adjust_traces_with_ccf(flat, arm)
 
         if config['calib_type'] == 'Static':
             # load wave calibration based on ThAr
-            ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
-                veloce_reduction_tools.load_prefitted_wave(
-                    arm=arm, wave_calib_slice=traces.wave_calib_slice, wave_path=veloce_paths.wave_dir)
-            static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
-        # elif config['calib_type'] == 'Interpolate':
-        #     wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation()
-        else:
-            pass
-
-        if config['calib_type'] == 'arcTh':
+            # ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = \
+            #     veloce_reduction_tools.load_prefitted_wave(
+            #         arm=arm, wave_calib_slice=traces.wave_calib_slice, wave_path=veloce_paths.wave_dir)
+            # static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
+            static_wave, ref_arcTh, _ = veloce_reduction_tools.load_extracted_spectrum_fits(
+                os.path.join(veloce_paths.wave_dir, f"arcTh_wave_{arm}_230828.fits"))
+            veloce_wavecalib.add_predetermined_resolution(arm, date, veloce_paths)
+        elif config['calib_type'] == 'arcTh':
             arcTh_wave = veloce_wavecalib.calibrate_absolute_Th(traces, veloce_paths, obs_list,
                                                date, arm, config['amplifier_mode'],
                                                plot=config['plot_diagnostic'], plot_filename=f'arcTh_wavecalib_{arm}_{date}',
                                                th_linelist_filename='Default')
+        elif config['calib_type'] == 'buildLC':
+                if arm == 'blue':
+                    print('[Warning] LC calibration not supported for blue arm')
+                    continue
+                vacuum_wave, calibrated_pixels_per_order = veloce_wavecalib.build_LC_wavelength_solution(
+                    traces, veloce_paths, date,
+                    arm, config['amplifier_mode'], obs_list,
+                    estimate_resolution=config['estimate_resolution'], plot=config['plot_diagnostic'], filename=None)
+        elif config['calib_type'] == 'SimLC':
+            veloce_wavecalib.add_predetermined_resolution(arm, date, veloce_paths)
+        # elif config['calib_type'] == 'Interpolate':
+        #     wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation() 
 
         for target, filename in target_list[date]:
         # for target, filename in target_list:
@@ -325,14 +253,15 @@ def extract_night(target_list, config, veloce_paths, obs_list):
                         image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, norm_flat, hdr)
 
                     if config['scattered_light']:
-                        image_subtracted_bias, hdr = remove_scattered_light(image_subtracted_bias, hdr, traces)
+                        image_subtracted_bias, hdr = veloce_reduction_tools.remove_scattered_light(image_subtracted_bias, hdr, traces)
 
-                    extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
+                    extracted_science_orders,  extracted_uncertainties_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
                         image_subtracted_bias, traces, remove_background=False)
                     
                     if config['calib_type'] == 'Static':
-                        vacuum_wave = static_wave
+                        final_wave = static_wave
                         final_flux = extracted_science_orders
+                        final_uncertainty = extracted_uncertainties_orders
                     # elif config['calib_type'] == 'Interpolate':
                     #     vacuum_wave = veloce_wavecalib.interpolate_wave(extracted_science_orders, hdr)                    
                     #     final_flux = extracted_science_orders
@@ -340,14 +269,16 @@ def extract_night(target_list, config, veloce_paths, obs_list):
                     #     vacuum_wave = veloce_wavecalib.calibrate_simTh(extracted_science_orders, hdr)                    
                     #     final_flux = extracted_science_orders
                     elif config['calib_type'] == 'SimLC':
-                            vacuum_wave, final_flux = veloce_wavecalib.calibrate_simLC(
+                        vacuum_wave, final_flux, final_uncertainty = veloce_wavecalib.calibrate_simLC(
                                 extracted_science_orders, veloce_paths, image_subtracted_bias,
-                                hdr, arm, plot=config['plot_diagnostic'], filename=filename)
-                    
-                    if config['calib_type'] == 'SimLC' or config['calib_type'] == 'Static':
+                                hdr, arm, flux_error=extracted_uncertainties_orders, plot=config['plot_diagnostic'], filename=filename)
                         final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
+                    elif config['calib_type'] == 'buildLC':
+                        final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
+                        final_flux = [flux[calibrated_pixels] for flux, calibrated_pixels in zip(extracted_science_orders, calibrated_pixels_per_order) if np.any(calibrated_pixels)]
+                        final_uncertainty = [flux_err[calibrated_pixels] for flux_err, calibrated_pixels in zip(extracted_uncertainties_orders, calibrated_pixels_per_order) if np.any(calibrated_pixels)]
                     elif config['calib_type'] == 'arcTh':
-                        final_wave, final_flux = arcTh_wave, extracted_science_orders
+                        final_wave, final_flux, final_uncertainty = arcTh_wave, extracted_science_orders, extracted_uncertainties_orders
                     else:
                         raise ValueError('Unsupported calib_type')
                     
@@ -365,9 +296,11 @@ def extract_night(target_list, config, veloce_paths, obs_list):
                                     veloce_paths=veloce_paths)
 
                     # save extracted spectrum as fits file
-                    fits_filename = os.path.join(veloce_paths.output_dir, f"{target}_veloce_{arm}_{filename}")
+                    fits_filename = os.path.join(veloce_paths.extracted_spectra_dir, f"{target}_veloce_{arm}_{filename}")
                     veloce_reduction_tools.save_extracted_spectrum_fits(
-                        filename=fits_filename, wave=final_wave, flux=final_flux, hdr=hdr)
+                        filename=fits_filename, wave=final_wave, flux=final_flux, hdr=hdr, err=final_uncertainty)
+    if config['merge_orders']:
+        veloce_normalise.merge_veloce_orders(veloce_paths, target_list, arms, config, obs_list, single_file=False, skip_edge_orders=True)
 
 def extract_single_file(filename, config, veloce_paths, obs_list):
     """
@@ -399,31 +332,21 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
         raise ValueError('Unsupported arm')
     
     for arm in arms:
-        print(arm)
+        print(f"Processing {arm} arm")
         ccd = data_dirs[arm]
         ### load traces
-        traces = load_trace_data(arm, veloce_paths.trace_dir, sim_calib=config['sim_calib'], filename=config['trace_file'])
-        # flat, norm_flat = get_flat(veloce_paths, arm, config['amplifier_mode'], config['date'], obs_list)
+        traces = veloce_reduction_tools.load_trace_data(arm, veloce_paths.trace_dir, filename=config['trace_file'])
         if config['validate_trace']:
-            traces = get_trace_shift(traces, veloce_paths,
-                                 arm, config['amplifier_mode'], config['sim_calib'],
-                                 obs_list)
-        # traces.adjust_traces_with_ccf(flat, arm)
-
-        # if sim_calib:
-        #     # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_trace.npz'))
-        #     filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_sim_calib_trace.pkl')
-        #     traces = veloce_reduction_tools.Traces.load_traces(filename)
-        # else:
-        #     # trace_data = np.load(os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.npz'))
-        #     filename = os.path.join(veloce_paths.trace_dir, f'veloce_{arm}_4amp_no_sim_calib_trace.pkl')
-        #     traces = veloce_reduction_tools.Traces.load_traces(filename)
+            traces = veloce_reduction_tools.get_trace_shift(traces, veloce_paths, arm, config['amplifier_mode'], obs_list)
         
         if config['calib_type'] == 'Static':
             # load static wave calibration based on ThAr
-            ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = veloce_reduction_tools.load_prefitted_wave(
-                arm=arm, wave_calib_slice=traces.wave_calib_slice, wave_path=veloce_paths.wave_dir)
-            static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
+            # ORDER, COEFFS, MATCH_LAM, MATCH_PIX, MATCH_LRES, GUESS_LAM, Y0 = veloce_reduction_tools.load_prefitted_wave(
+            #     arm=arm, wave_calib_slice=traces.wave_calib_slice, wave_path=veloce_paths.wave_dir)
+            # static_wave = veloce_reduction_tools.calibrate_orders_to_wave(None, Y0, COEFFS, traces=traces)
+            static_wave, ref_arcTh, _ = veloce_reduction_tools.load_extracted_spectrum_fits(
+                os.path.join(veloce_paths.wave_dir, f"arcTh_wave_{arm}_230828.fits"))
+            veloce_wavecalib.add_predetermined_resolution(arm, config['date'], veloce_paths)
         # elif config['calib_type'] == 'Interpolate':
         #     wave_interp_base = veloce_wavecalib.load_wave_calibration_for_interpolation()
         elif config['calib_type'] == 'arcTh':
@@ -431,8 +354,15 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
                                                config['date'], arm, config['amplifier_mode'],
                                                plot=config['plot_diagnostic'], plot_filename=f'arcTh_wavecalib_{arm}_{config["date"]}',
                                                th_linelist_filename='Default')
-        else:
-            pass
+        elif config['calib_type'] == 'buildLC':
+                if arm == 'blue':
+                    raise ValueError('buildLC calibration not supported for blue arm')
+                vacuum_wave, calibrated_pixels_per_order = veloce_wavecalib.build_LC_wavelength_solution(
+                    traces, veloce_paths, config['date'],
+                    arm, config['amplifier_mode'], obs_list,
+                    estimate_resolution=config['estimate_resolution'], plot=config['plot_diagnostic'], filename=None)   
+        elif config['calib_type'] == 'SimLC':
+            veloce_wavecalib.add_predetermined_resolution(arm, config['date'], veloce_paths)
 
         if int(filename[5]) == arm_nums[arm]:
             print(filename)
@@ -447,18 +377,19 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
                             image_data, hdr, arm, config['amplifier_mode'], overscan_range=32)
                 
                 if config['flat_field']:
-                    flat, norm_flat = get_flat(veloce_paths, arm, config['amplifier_mode'], config['date'], obs_list)
+                    flat, norm_flat = veloce_reduction_tools.get_flat(veloce_paths, arm, config['amplifier_mode'], config['date'], obs_list)
                     image_subtracted_bias, hdr = veloce_reduction_tools.flat_field_correction(image_subtracted_bias, norm_flat, hdr)
                 
                 if config['scattered_light']:
-                    image_subtracted_bias, hdr = remove_scattered_light(image_subtracted_bias, hdr, traces)
+                    image_subtracted_bias, hdr = veloce_reduction_tools.remove_scattered_light(image_subtracted_bias, hdr, traces)
                 
-                extracted_science_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
+                extracted_science_orders, extracted_uncertainties_orders, extracted_order_imgs = veloce_reduction_tools.extract_orders_with_trace(
                     image_subtracted_bias, traces, remove_background=False)
       
                 if config['calib_type'] == 'Static':
-                    vacuum_wave = static_wave                    
+                    final_wave = static_wave                    
                     final_flux = extracted_science_orders
+                    final_uncertainty = extracted_uncertainties_orders
                 # elif config['calib_type'] == 'Interpolate':
                 #     vacuum_wave = veloce_wavecalib.interpolate_wave(extracted_science_orders, hdr)                    
                 #     final_flux = extracted_science_orders
@@ -466,14 +397,18 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
                 #     vacuum_wave = veloce_wavecalib.calibrate_simTh(extracted_science_orders, hdr)                    
                 #     final_flux = extracted_science_orders
                 elif config['calib_type'] == 'SimLC':
-                    vacuum_wave, final_flux = veloce_wavecalib.calibrate_simLC(
+                    vacuum_wave, final_flux, final_uncertainty = veloce_wavecalib.calibrate_simLC(
                                 extracted_science_orders, veloce_paths, image_subtracted_bias,
-                                hdr, arm, plot=config['plot_diagnostic'], filename=filename)
-                    
-                if config['calib_type'] == 'SimLC' or config['calib_type'] == 'Static':
+                                hdr, arm, plot=config['plot_diagnostic'], filename=filename, flux_error=extracted_uncertainties_orders)
                     final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
+                elif config['calib_type'] == 'buildLC':
+                    final_wave = [veloce_reduction_tools.vacuum_to_air(wave) for wave in vacuum_wave]
+                    final_flux = [flux[calibrated_pixels] for flux, calibrated_pixels in zip(extracted_science_orders, calibrated_pixels_per_order) if np.any(calibrated_pixels)]
+                    final_uncertainty = [err[calibrated_pixels] for err, calibrated_pixels in zip(extracted_uncertainties_orders, calibrated_pixels_per_order) if np.any(calibrated_pixels)]
                 elif config['calib_type'] == 'arcTh':
-                    final_wave, final_flux = arcTh_wave, extracted_science_orders
+                    final_wave, final_flux, final_uncertainty = arcTh_wave, extracted_science_orders, extracted_uncertainties_orders
+                else:
+                    raise ValueError('Unsupported calib_type')
 
                 if config['plot_diagnostic']:
                             veloce_diagnostic.plot_order_cross_section(
@@ -489,9 +424,12 @@ def extract_single_file(filename, config, veloce_paths, obs_list):
                                     veloce_paths=veloce_paths)
 
                 # save extracted spectrum as fits file
-                fits_filename = os.path.join(veloce_paths.output_dir, f"veloce_{arm}_{filename}")
+                fits_filename = os.path.join(veloce_paths.extracted_spectra_dir, f"veloce_{arm}_{filename}")
                 veloce_reduction_tools.save_extracted_spectrum_fits(
-                    filename=fits_filename, wave=final_wave, flux=final_flux, hdr=hdr)
-                
+                    filename=fits_filename, wave=final_wave, flux=final_flux, hdr=hdr, err=final_uncertainty)
+    if config['merge_orders']:
+        veloce_normalise.merge_veloce_orders(veloce_paths, hdr['OBJECT'], arms, config, obs_list, single_file=fits_filename, skip_edge_orders=True)
+
+
 if __name__ == '__main__':
     pass
